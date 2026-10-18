@@ -38,8 +38,8 @@ pub enum Commands {
         #[arg(short, long, default_value = "backup.wbak")]
         output: PathBuf,
 
-        /// Additional file or directory paths to include (supports `${USERPROFILE}`, `${APPDATA}`, etc.)
-        #[arg(long = "path")]
+        /// File or directory paths to include (repeatable; supports `.`, `C:\Users\john\Documents`, `${USERPROFILE}`, etc.)
+        #[arg(short = 'd', long = "path", visible_alias = "dir")]
         paths: Vec<String>,
 
         /// Additional Windows Registry keys to include (e.g. `HKCU\Environment`, `HKCU\Console`)

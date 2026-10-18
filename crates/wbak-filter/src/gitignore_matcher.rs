@@ -150,8 +150,13 @@ impl GitignoreMatcher {
     ) -> DomainResult<Self> {
         let mut rules = Vec::new();
 
-        // Built-in Windows system lock files that should always be ignored unless exempted
-        for sys_pat in ["**/pagefile.sys", "**/hiberfil.sys", "**/swapfile.sys"] {
+        // Built-in Windows system lock files and .wbak archives that should always be ignored unless exempted
+        for sys_pat in [
+            "**/pagefile.sys",
+            "**/hiberfil.sys",
+            "**/swapfile.sys",
+            "**/*.wbak",
+        ] {
             if let Some(rule) = CompiledRule::compile(sys_pat)? {
                 rules.push(rule);
             }

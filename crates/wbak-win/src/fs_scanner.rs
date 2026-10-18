@@ -189,14 +189,27 @@ impl FileScannerPort for WindowsFileScanner {
         let mut results = Vec::new();
 
         for raw_path in include_paths {
-            let resolved = if raw_path.to_string_lossy().contains("${") {
+            let mut resolved = if raw_path.to_string_lossy().contains("${") {
                 self.tokenizer.detokenize(&raw_path.to_string_lossy())
             } else {
                 raw_path.clone()
             };
 
+            if resolved.is_relative() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    resolved = cwd.join(&resolved);
+                }
+            }
+
             if !resolved.exists() {
                 continue;
+            }
+
+            if let Ok(canon) = fs::canonicalize(&resolved) {
+                resolved = PathBuf::from(
+                    wbak_domain::normalize_slashes(&canon.to_string_lossy())
+                        .replace('/', std::path::MAIN_SEPARATOR_STR),
+                );
             }
 
             if resolved.is_file() {
