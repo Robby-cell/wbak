@@ -123,11 +123,15 @@ impl ArchiveWriterPort for WbakArchiveWriter {
         let mut buffer = vec![0u8; self.chunk_size];
 
         for (idx, node) in input.files.iter_mut().enumerate() {
+            let display_path = node
+                .logical_path
+                .strip_prefix("${USERPROFILE}/")
+                .unwrap_or(&node.logical_path);
             progress.on_progress(ProgressEvent {
                 phase: ProgressPhase::PackingChunks,
                 current: idx as u64 + 1,
                 total: Some(total_nodes),
-                message: format!("Packing {}", node.logical_path),
+                message: format!("Packing {display_path}"),
             });
 
             let is_secret = node.is_secret();

@@ -43,13 +43,12 @@ impl ProgressSinkPort for CliProgressSink {
     fn on_progress(&self, event: ProgressEvent) {
         if let Ok(guard) = self.bar.lock() {
             if let Some(pb) = guard.as_ref() {
-                if let Some(total) = event.total {
-                    pb.set_length(total);
-                    pb.set_position(event.current);
-                }
-                pb.set_message(event.message.clone());
-                if matches!(event.phase, ProgressPhase::Completed) {
-                    pb.finish_with_message(event.message);
+                if !matches!(event.phase, ProgressPhase::Completed) {
+                    if let Some(total) = event.total {
+                        pb.set_length(total);
+                        pb.set_position(event.current);
+                    }
+                    pb.set_message(event.message);
                 }
             }
         }

@@ -424,11 +424,18 @@ impl WbakApplication {
                 }
             }
 
+            let common_parent = if request.target_dir_override.is_some() {
+                compute_common_parent_prefix(&manifest.files)
+            } else {
+                None
+            };
+
             let total = matching_nodes.len() as u64;
             for (idx, node) in matching_nodes.into_iter().enumerate() {
                 let target_path = self.resolve_restore_target(
                     &node.logical_path,
                     request.target_dir_override.as_deref(),
+                    common_parent.as_deref(),
                 );
 
                 progress.on_progress(ProgressEvent {
@@ -555,18 +562,139 @@ impl WbakApplication {
         &self,
         logical_path: &str,
         target_dir_override: Option<&Path>,
+        common_parent: Option<&str>,
     ) -> PathBuf {
         let Some(override_root) = target_dir_override else {
             return self.tokenizer.detokenize(logical_path);
         };
 
-        // Strip `${TOKEN}/` or drive letter (`C:/`) when extracting into a sandbox target directory
-        let sanitized = logical_path
-            .replace('\\', "/")
-            .replace("${", "")
-            .replace('}', "")
-            .replace(':', "");
-        let rel = sanitized.trim_start_matches('/');
+        let norm = logical_path.replace('\\', "/");
+
+        // 1. If all entries in the archive share a common parent directory (e.g. `${USERPROFILE}/Languages`),
+        // strip that prefix so `-t Output` extracts directly into `Output/`.
+        if let Some(prefix) = common_parent {
+            if !prefix.is_empty() {
+                let prefix_with_slash = format!("{prefix}/");
+                if let Some(stripped) = norm.strip_prefix(&prefix_with_slash) {
+                    if !stripped.is_empty() {
+                        return override_root
+                            .join(stripped.replace('/', std::path::MAIN_SEPARATOR_STR));
+                    }
+                }
+            }
+        }
+
+        // 2. Otherwise strip any leading `${TOKEN}/` or drive prefix (`C:/`) completely.
+        let rel = strip_leading_token_or_drive(&norm);
         override_root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+}
+
+/// Computes the longest common parent directory shared by all `FileNode` entries in an archive.
+pub fn compute_common_parent_prefix(files: &[FileNode]) -> Option<String> {
+    let mut common_segments: Option<Vec<&str>> = None;
+
+    for node in files {
+        let norm = node.logical_path.trim_end_matches('/');
+        let parent = match norm.rsplit_once('/') {
+            Some((p, _)) => p,
+            None => "",
+        };
+        let segments: Vec<&str> = if parent.is_empty() {
+            Vec::new()
+        } else {
+            parent.split('/').collect()
+        };
+
+        match &mut common_segments {
+            None => common_segments = Some(segments),
+            Some(existing) => {
+                let match_len = existing
+                    .iter()
+                    .zip(segments.iter())
+                    .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+                    .count();
+                existing.truncate(match_len);
+            }
+        }
+    }
+
+    common_segments.map(|segs| segs.join("/"))
+}
+
+/// Strips a leading `${TOKEN}/` (e.g. `${USERPROFILE}/`) or Windows drive prefix (`C:/`) from a path.
+pub fn strip_leading_token_or_drive(norm_path: &str) -> &str {
+    let s = norm_path.trim_start_matches('/');
+    if s.starts_with("${") {
+        if let Some(close_idx) = s.find('}') {
+            let after = &s[close_idx + 1..];
+            return after.trim_start_matches('/');
+        }
+    }
+    if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        return s[2..].trim_start_matches('/');
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use wbak_domain::{ChunkId, FileNode, FileNodeKind, SensitivityLevel, WindowsFileAttributes};
+
+    use super::*;
+
+    fn dummy_node(logical_path: &str, is_dir: bool) -> FileNode {
+        FileNode {
+            logical_path: logical_path.to_string(),
+            original_path: logical_path.to_string(),
+            kind: if is_dir {
+                FileNodeKind::Directory
+            } else {
+                FileNodeKind::RegularFile {
+                    size: 10,
+                    chunks: vec![],
+                    content_hash: ChunkId(String::new()),
+                }
+            },
+            sensitivity: SensitivityLevel::Public,
+            attributes: WindowsFileAttributes::default(),
+            modified_at: None,
+            created_at: None,
+        }
+    }
+
+    #[test]
+    fn single_directory_backup_extracts_contents_without_userprofile_folder() {
+        let files = vec![
+            dummy_node("${USERPROFILE}/Languages/rust", true),
+            dummy_node("${USERPROFILE}/Languages/rust/main.rs", false),
+            dummy_node("${USERPROFILE}/Languages/cpp", true),
+            dummy_node("${USERPROFILE}/Languages/cpp/main.cpp", false),
+        ];
+
+        let common = compute_common_parent_prefix(&files);
+        assert_eq!(common.as_deref(), Some("${USERPROFILE}/Languages"));
+
+        let prefix = format!("{}/", common.unwrap());
+        assert_eq!(
+            files[0].logical_path.strip_prefix(&prefix),
+            Some("rust")
+        );
+        assert_eq!(
+            files[1].logical_path.strip_prefix(&prefix),
+            Some("rust/main.rs")
+        );
+    }
+
+    #[test]
+    fn strip_leading_token_removes_entire_token_not_just_braces() {
+        assert_eq!(
+            strip_leading_token_or_drive("${USERPROFILE}/Languages/main.rs"),
+            "Languages/main.rs"
+        );
+        assert_eq!(
+            strip_leading_token_or_drive("C:/Projects/app/src/lib.rs"),
+            "Projects/app/src/lib.rs"
+        );
     }
 }
