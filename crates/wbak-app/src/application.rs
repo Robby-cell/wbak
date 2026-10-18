@@ -1,16 +1,17 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use wbak_domain::{
-    is_ssh_path, ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort, ChunkId,
-    CryptoProviderPort, DiffCalculator, DomainError, DomainResult, EnvironmentRepositoryPort,
-    FileNode, FileNodeKind, FileRestorerPort, FileScannerPort, LiveFileProbe,
-    PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent, ProgressPhase, ProgressSinkPort,
-    RegistryBackupConfig, RegistryBrowseItem, RegistryHive, RegistryRepositoryPort, ScannedEntry,
-    ScannedEntryKind, SecretPromptPort, SensitivityLevel, SystemDriftReport,
+    is_ssh_path, ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort,
+    ChunkId, CryptoProviderPort, DiffCalculator, DomainError, DomainResult,
+    EnvironmentRepositoryPort, FileNode, FileNodeKind, FileRestorerPort, FileScannerPort,
+    IncrementalStats, LiveFileProbe, PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent,
+    ProgressPhase, ProgressSinkPort, RegistryBackupConfig, RegistryBrowseItem, RegistryHive,
+    RegistryRepositoryPort, ScannedEntry, ScannedEntryKind, SecretPromptPort, SensitivityLevel,
+    SystemDriftReport,
 };
 
 use crate::dto::{CreateBackupRequest, RestoreBackupRequest, RestoreSummary};
@@ -92,13 +93,16 @@ impl WbakApplication {
         )
     }
 
-    /// Executes a complete backup workflow:
+    /// Executes a complete or incremental backup workflow:
     /// 1. Builds `.wbakignore` filter (with `!` exemptions)
     /// 2. Scans filesystem & auto-detects `.ssh` / sensitive files
-    /// 3. Enforces default encryption for sensitive files (prompting if needed)
-    /// 4. Exports Windows Registry keys & values
-    /// 5. Optionally captures `winget` packages & environment variables
-    /// 6. Writes deduplicated, compressed `.wbak` archive
+    /// 3. If `output_archive` already exists and `!force_full_rebuild`, matches against previous
+    ///    manifest (`size` + `modified_at`) so unchanged files are reused with zero disk reads,
+    ///    and deleted files are pruned from the manifest (unless `keep_deleted` is set).
+    /// 4. Enforces default encryption for sensitive files (prompting if needed)
+    /// 5. Exports Windows Registry keys & values
+    /// 6. Optionally captures `winget` packages & environment variables
+    /// 7. Writes or incrementally appends `.wbak` archive (and optionally compacts dead chunks)
     pub fn create_backup(
         &self,
         request: CreateBackupRequest,
@@ -133,23 +137,99 @@ impl WbakApplication {
             false,
         )?;
 
+        // Load existing manifest if updating an existing `.wbak` archive incrementally
+        let previous_manifest = if !request.force_full_rebuild && request.output_archive.exists() {
+            match self
+                .archive_reader
+                .read_manifest(&request.output_archive, request.passphrase.as_deref())
+            {
+                Ok(m) => Some(m),
+                Err(DomainError::PassphraseRequired(reason)) => {
+                    if let Some(prompter) = secret_prompt {
+                        let pass = prompter.prompt_passphrase(&reason, false)?;
+                        self.archive_reader
+                            .read_manifest(&request.output_archive, Some(&pass))
+                            .ok()
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let prev_files_map: BTreeMap<String, &FileNode> = previous_manifest
+            .as_ref()
+            .map(|m| m.files.iter().map(|f| (f.logical_path.clone(), f)).collect())
+            .unwrap_or_default();
+
+        let mut seen_logical_paths = BTreeSet::new();
+        let mut inc_stats = IncrementalStats::default();
         let mut file_nodes = Vec::with_capacity(scanned.len());
-        let mut first_secret_path: Option<String> = None;
+        let mut first_new_secret_path: Option<String> = None;
 
         for entry in scanned {
             if !entry.filter_decision.is_included() {
                 continue;
             }
-            if entry.sensitivity == SensitivityLevel::Secret && first_secret_path.is_none() {
-                first_secret_path = Some(entry.logical_path.clone());
-            }
+            seen_logical_paths.insert(entry.logical_path.clone());
 
             let kind = match entry.kind {
-                ScannedEntryKind::RegularFile { size } => FileNodeKind::RegularFile {
-                    size,
-                    chunks: Vec::new(),
-                    content_hash: ChunkId(String::new()),
-                },
+                ScannedEntryKind::RegularFile { size } => {
+                    let mut reused = None;
+                    if let (Some(prev_manifest), Some(prev_node)) = (
+                        previous_manifest.as_ref(),
+                        prev_files_map.get(&entry.logical_path),
+                    ) {
+                        if let FileNodeKind::RegularFile {
+                            size: prev_size,
+                            chunks: prev_chunks,
+                            content_hash: prev_hash,
+                        } = &prev_node.kind
+                        {
+                            let same_size = *prev_size == size;
+                            let same_mtime =
+                                timestamps_match(prev_node.modified_at, entry.modified_at);
+                            let chunks_present = !prev_chunks.is_empty()
+                                && prev_chunks
+                                    .iter()
+                                    .all(|cid| prev_manifest.chunks.contains_key(cid));
+
+                            if same_size && same_mtime && chunks_present {
+                                reused = Some((prev_chunks.clone(), prev_hash.clone()));
+                            }
+                        }
+                    }
+
+                    if let Some((chunks, content_hash)) = reused {
+                        inc_stats.files_unchanged += 1;
+                        inc_stats.bytes_reused += size;
+                        FileNodeKind::RegularFile {
+                            size,
+                            chunks,
+                            content_hash,
+                        }
+                    } else {
+                        if prev_files_map.contains_key(&entry.logical_path) {
+                            inc_stats.files_modified += 1;
+                        } else {
+                            inc_stats.files_added += 1;
+                        }
+                        inc_stats.bytes_appended += size;
+                        if entry.sensitivity == SensitivityLevel::Secret
+                            && first_new_secret_path.is_none()
+                        {
+                            first_new_secret_path = Some(entry.logical_path.clone());
+                        }
+                        FileNodeKind::RegularFile {
+                            size,
+                            chunks: Vec::new(),
+                            content_hash: ChunkId(String::new()),
+                        }
+                    }
+                }
                 ScannedEntryKind::Directory => FileNodeKind::Directory,
                 ScannedEntryKind::Symlink { target, is_dir } => {
                     FileNodeKind::Symlink { target, is_dir }
@@ -167,10 +247,24 @@ impl WbakApplication {
             });
         }
 
+        // Check for deleted files that were in `previous_manifest` but are no longer on disk
+        if let Some(prev_m) = &previous_manifest {
+            for old_node in &prev_m.files {
+                if !seen_logical_paths.contains(&old_node.logical_path) {
+                    if matches!(old_node.kind, FileNodeKind::RegularFile { .. }) {
+                        inc_stats.files_deleted += 1;
+                    }
+                    if request.keep_deleted {
+                        file_nodes.push(old_node.clone());
+                    }
+                }
+            }
+        }
+
         let encrypt_secrets_by_default =
             profile.security.encrypt_sensitive_by_default && !request.allow_unencrypted_secrets;
         let needs_passphrase = profile.security.encrypt_full_archive
-            || (encrypt_secrets_by_default && first_secret_path.is_some());
+            || (encrypt_secrets_by_default && first_new_secret_path.is_some());
 
         let passphrase = match (&request.passphrase, needs_passphrase) {
             (Some(p), _) if !p.is_empty() => Some(p.clone()),
@@ -180,7 +274,7 @@ impl WbakApplication {
                 } else {
                     format!(
                         "Sensitive file detected ({}) — encrypted by default",
-                        first_secret_path.as_deref().unwrap_or(".ssh")
+                        first_new_secret_path.as_deref().unwrap_or(".ssh")
                     )
                 };
                 if let Some(prompter) = secret_prompt {
@@ -223,21 +317,37 @@ impl WbakApplication {
             None
         };
 
+        let was_incremental = previous_manifest.is_some();
         let build_input = ArchiveBuildInput {
             profile: profile.profile.clone(),
             compression_level: profile.profile.compression_level,
             encrypt_full_archive: profile.security.encrypt_full_archive,
             encrypt_secrets_by_default,
-            passphrase,
+            passphrase: passphrase.clone(),
             files: file_nodes,
             registry: registry_tree,
             winget,
             env_vars,
+            previous_manifest,
         };
 
-        let manifest =
-            self.archive_writer
-                .write_archive(&request.output_archive, build_input, progress)?;
+        let mut manifest = self.archive_writer.write_archive(
+            &request.output_archive,
+            build_input,
+            progress,
+        )?;
+
+        if request.compact_after_update && manifest.stats.reclaimable_chunks > 0 {
+            manifest = self.archive_writer.compact_archive(
+                &request.output_archive,
+                passphrase.as_deref(),
+                progress,
+            )?;
+        }
+
+        if was_incremental {
+            manifest.stats.last_incremental = Some(inc_stats);
+        }
 
         progress.on_progress(ProgressEvent {
             phase: ProgressPhase::Completed,
@@ -252,6 +362,18 @@ impl WbakApplication {
         });
 
         Ok(manifest)
+    }
+
+    /// Reclaims unreferenced dead chunks (from deleted or modified files) by streaming
+    /// live compressed chunks into a compacted archive without decompressing or re-compressing.
+    pub fn compact_archive(
+        &self,
+        archive_path: &Path,
+        passphrase: Option<&str>,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest> {
+        self.archive_writer
+            .compact_archive(archive_path, passphrase, progress)
     }
 
     pub fn inspect_archive(
@@ -278,9 +400,7 @@ impl WbakApplication {
         archive_path: &Path,
         passphrase: Option<&str>,
     ) -> DomainResult<SystemDriftReport> {
-        let manifest = self
-            .archive_reader
-            .read_manifest(archive_path, passphrase)?;
+        let manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
 
         let mut live_probes = BTreeMap::new();
         for node in &manifest.files {
@@ -587,6 +707,13 @@ impl WbakApplication {
         // 2. Otherwise strip any leading `${TOKEN}/` or drive prefix (`C:/`) completely.
         let rel = strip_leading_token_or_drive(&norm);
         override_root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+}
+
+fn timestamps_match(a: Option<DateTime<Utc>>, b: Option<DateTime<Utc>>) -> bool {
+    match (a, b) {
+        (Some(ta), Some(tb)) => ta.timestamp_millis() == tb.timestamp_millis(),
+        _ => false,
     }
 }
 

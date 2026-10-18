@@ -7,7 +7,7 @@ use crate::entities::{
 use crate::error::DomainResult;
 use crate::ports::ProgressSinkPort;
 
-/// Input payload for creating a `.wbak` archive container.
+/// Input payload for creating or incrementally updating a `.wbak` archive container.
 pub struct ArchiveBuildInput {
     pub profile: ProfileMetadata,
     pub compression_level: i32,
@@ -18,14 +18,26 @@ pub struct ArchiveBuildInput {
     pub registry: RegistryTree,
     pub winget: Option<WingetManifest>,
     pub env_vars: Option<EnvVarsSnapshot>,
+    /// When present and `output_path` exists on disk, `ArchiveWriterPort` performs an
+    /// in-place tail append (Strategy 1), reusing all existing chunks without rewriting them.
+    pub previous_manifest: Option<ArchiveManifest>,
 }
 
-/// Port for writing `.wbak` deduplicated, compressed, and encrypted archives.
+/// Port for writing, incrementally updating, and compacting `.wbak` archives.
 pub trait ArchiveWriterPort: Send + Sync {
     fn write_archive(
         &self,
         output_path: &Path,
         input: ArchiveBuildInput,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest>;
+
+    /// Reclaims unreferenced dead chunks (from deleted or modified files) by streaming
+    /// live compressed chunks into a compacted archive without decompressing or re-compressing.
+    fn compact_archive(
+        &self,
+        archive_path: &Path,
+        passphrase: Option<&str>,
         progress: &dyn ProgressSinkPort,
     ) -> DomainResult<ArchiveManifest>;
 }

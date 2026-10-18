@@ -123,6 +123,9 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
                 output_archive: archive_path.clone(),
                 passphrase: None,
                 allow_unencrypted_secrets: false,
+                force_full_rebuild: false,
+                keep_deleted: false,
+                compact_after_update: false,
             },
             &NoopProgressSink,
             None,
@@ -134,10 +137,13 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
     let manifest = app
         .create_backup(
             CreateBackupRequest {
-                profile,
+                profile: profile.clone(),
                 output_archive: archive_path.clone(),
                 passphrase: Some("enterprise-pass-999".to_string()),
                 allow_unencrypted_secrets: false,
+                force_full_rebuild: false,
+                keep_deleted: false,
+                compact_after_update: false,
             },
             &NoopProgressSink,
             None,
@@ -212,6 +218,52 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
     );
     let restored_reg_val: String = test_reg.get_value("EnvironmentProfile").unwrap();
     assert_eq!(restored_reg_val, "enterprise-prod");
+
+    // 8. Incremental update + deletion + compaction:
+    // Delete `keep-tool.exe` and modify `src/main.rs`, then run incremental backup on the existing archive.
+    std::fs::remove_file(target_release_dir.join("keep-tool.exe")).unwrap();
+    std::fs::write(
+        proj_dir.join("src").join("main.rs"),
+        b"fn main() { println!(\"v2\"); }",
+    )
+    .unwrap();
+
+    let updated_manifest = app
+        .create_backup(
+            CreateBackupRequest {
+                profile,
+                output_archive: archive_path.clone(),
+                passphrase: Some("enterprise-pass-999".to_string()),
+                allow_unencrypted_secrets: false,
+                force_full_rebuild: false,
+                keep_deleted: false,
+                compact_after_update: false,
+            },
+            &NoopProgressSink,
+            None,
+        )
+        .unwrap();
+
+    // Deleted `keep-tool.exe` must no longer be in the manifest, and dead chunks should be tracked
+    assert!(!updated_manifest
+        .files
+        .iter()
+        .any(|f| f.logical_path.ends_with("keep-tool.exe")));
+    assert!(updated_manifest.stats.reclaimable_chunks >= 2);
+
+    // Compact the archive to garbage-collect dead chunks without re-compressing live chunks
+    let size_before_compact = std::fs::metadata(&archive_path).unwrap().len();
+    let compacted_manifest = app
+        .compact_archive(
+            &archive_path,
+            Some("enterprise-pass-999"),
+            &NoopProgressSink,
+        )
+        .unwrap();
+    let size_after_compact = std::fs::metadata(&archive_path).unwrap().len();
+    assert_eq!(compacted_manifest.stats.reclaimable_chunks, 0);
+    assert_eq!(compacted_manifest.stats.reclaimable_bytes, 0);
+    assert!(size_after_compact < size_before_compact);
 
     // Clean up test registry key
     let _ = hkcu.delete_subkey_all(reg_subkey);

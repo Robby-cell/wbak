@@ -28,13 +28,14 @@ pub enum Commands {
         ignore: PathBuf,
     },
 
-    /// Create a deduplicated, compressed `.wbak` backup archive
+    /// Create or incrementally update a deduplicated, compressed `.wbak` backup archive
+    #[command(visible_alias = "update")]
     Backup {
         /// Path to a `wbak.toml` profile file (optional if `--path` or `--reg` is given)
         #[arg(short, long)]
         profile: Option<PathBuf>,
 
-        /// Output `.wbak` archive file path
+        /// Output `.wbak` archive file path (if it already exists, performs a fast incremental update unless `--full` is set)
         #[arg(short, long, default_value = "backup.wbak")]
         output: PathBuf,
 
@@ -69,6 +70,28 @@ pub enum Commands {
         /// Explicitly allow saving `.ssh` keys and secrets without encryption (not recommended)
         #[arg(long)]
         allow_unencrypted_secrets: bool,
+
+        /// Force a full archive rebuild from scratch instead of an incremental tail update
+        #[arg(long)]
+        full: bool,
+
+        /// Retain files deleted on disk in the archive manifest during an incremental update
+        #[arg(long)]
+        keep_deleted: bool,
+
+        /// Automatically compact dead/superseded chunks after an incremental update
+        #[arg(long)]
+        compact: bool,
+    },
+
+    /// Reclaim dead space from deleted or modified files without re-compressing live chunks
+    Compact {
+        /// Path to the `.wbak` archive to compact
+        archive: PathBuf,
+
+        /// Passphrase if the full archive manifest is encrypted
+        #[arg(long)]
+        password: Option<String>,
     },
 
     /// Restore files, registry settings, and optional `winget` packages from a `.wbak` archive
@@ -154,7 +177,7 @@ pub enum Commands {
         profile: Option<PathBuf>,
 
         /// Paths to scan
-        #[arg(long = "path")]
+        #[arg(short = 'd', long = "path", visible_alias = "dir")]
         paths: Vec<String>,
 
         /// `.wbakignore` file to evaluate

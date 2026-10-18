@@ -163,12 +163,37 @@ Outputs every discovered path marked as `[INCLUDE]`, `[EXEMPT!] (by '!/target/re
 wbak backup -p wbak.toml -o enterprise-env.wbak
 ```
 
----
+### 5. Incremental Updates, Deleted Files & Compaction
 
-### 5. Inspecting, Auditing Drift (`diff`), and Verifying Archives
+When you run `wbak backup` (or its alias `wbak update`) pointing `-o` at an **existing** `.wbak` archive, `wbak` automatically performs an **in-place incremental tail-append**:
+- **Unchanged files are skipped in $O(1)$**: Files whose `(size, modified_at)` match the existing archive manifest are not re-read, re-hashed, or re-compressed—their existing chunk references are reused directly.
+- **Modified & new files append to the tail**: Only new or changed chunks are compressed and appended at the end of the `.wbak` file, replacing the old manifest and 36-byte footer in seconds (even on a 30+ GB archive).
+- **Deleted files are removed from the manifest by default**: Any file that was deleted on disk is removed from the archive's active file index so it won't come back on restore. Pass `--keep-deleted` for additive/additive-only backups.
+- **Dead-chunk compaction (`wbak compact`)**: When files are deleted or modified, their old chunk bytes remain unreferenced inside the archive (reported as `Reclaimable space` in `wbak backup` and `wbak inspect`). Run `wbak compact` (or pass `--compact` during `wbak backup`) to stream live compressed chunks raw into a compacted archive without re-compressing or re-encrypting:
 
 ```powershell
-# Instantly list archive summary, deduplication savings, files, registry keys & winget packages
+# Incrementally update an existing 30 GB archive (only reads new/modified files; removes deleted files)
+wbak backup -d MyDocuments\ -o E:\Archive.wbak
+
+# Incrementally update AND keep files in the archive even if deleted locally
+wbak backup -d MyDocuments\ -o E:\Archive.wbak --keep-deleted
+
+# Incrementally update and immediately compact dead chunks
+wbak backup -d MyDocuments\ -o E:\Archive.wbak --compact
+
+# Force a full from-scratch rebuild instead of incremental append
+wbak backup -d MyDocuments\ -o E:\Archive.wbak --full
+
+# Reclaim space from deleted/modified files at any time (fast raw chunk copy)
+wbak compact E:\Archive.wbak
+```
+
+---
+
+### 6. Inspecting, Auditing Drift (`diff`), and Verifying Archives
+
+```powershell
+# Instantly list archive summary, deduplication savings, reclaimable dead space, files, registry & winget
 wbak inspect enterprise-env.wbak
 
 # Export the archive manifest as JSON for scripts/CI
@@ -183,7 +208,7 @@ wbak verify enterprise-env.wbak
 
 ---
 
-### 6. Native Windows GUI Mode
+### 7. Native Windows GUI Mode
 
 Launch the desktop GUI either by double-clicking `wbak.exe` in Explorer, running `wbak` with no arguments, or running:
 

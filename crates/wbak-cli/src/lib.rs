@@ -5,7 +5,9 @@ use anyhow::Result;
 use console::style;
 
 use wbak_app::{CreateBackupRequest, ProfileService, RestoreBackupRequest, WbakApplication};
-use wbak_domain::{DriftStatus, FilterDecision, ProfileConfig, SecretPromptPort, SensitivityLevel};
+use wbak_domain::{
+    DriftStatus, FilterDecision, ProfileConfig, SecretPromptPort, SensitivityLevel,
+};
 
 pub use commands::*;
 pub use terminal_ui::*;
@@ -41,6 +43,9 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
             encrypt,
             password,
             allow_unencrypted_secrets,
+            full,
+            keep_deleted,
+            compact,
         } => {
             let mut cfg = if let Some(prof_path) = &profile {
                 ProfileService::load_from_file(prof_path)?
@@ -82,6 +87,9 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
                     output_archive: output.clone(),
                     passphrase: password,
                     allow_unencrypted_secrets,
+                    force_full_rebuild: full,
+                    keep_deleted,
+                    compact_after_update: compact,
                 },
                 &progress,
                 Some(&prompter),
@@ -97,12 +105,30 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
                 "  Files backed up : {} ({} secret 🔒 encrypted by default)",
                 manifest.stats.total_files, manifest.stats.secret_files_count
             );
+            if let Some(inc) = &manifest.stats.last_incremental {
+                println!(
+                    "  Incremental     : {} unchanged ({} B reused), {} added, {} modified, {} deleted",
+                    style(inc.files_unchanged).green(),
+                    inc.bytes_reused,
+                    style(inc.files_added).cyan(),
+                    style(inc.files_modified).yellow(),
+                    style(inc.files_deleted).red()
+                );
+            }
             println!(
                 "  Unique chunks   : {} (Logical: {} B -> Stored: {} B)",
                 manifest.stats.unique_chunks,
                 manifest.stats.total_logical_bytes,
                 manifest.stats.compressed_stored_bytes
             );
+            if manifest.stats.reclaimable_chunks > 0 {
+                println!(
+                    "  Reclaimable     : {} dead chunks ({} B — run `wbak compact {}` to reclaim)",
+                    style(manifest.stats.reclaimable_chunks).yellow(),
+                    manifest.stats.reclaimable_bytes,
+                    output.display()
+                );
+            }
             println!(
                 "  Registry        : {} keys ({} values)",
                 manifest.stats.registry_keys_count, manifest.stats.registry_values_count
@@ -110,6 +136,33 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
             if let Some(wg) = &manifest.winget {
                 println!("  Winget packages : {}", wg.packages.len());
             }
+        }
+
+        Commands::Compact { archive, password } => {
+            let before_len = std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0);
+            let progress = CliProgressSink::new();
+            let prompter = CliSecretPrompter;
+
+            let manifest = match app.compact_archive(&archive, password.as_deref(), &progress) {
+                Ok(m) => m,
+                Err(wbak_domain::DomainError::PassphraseRequired(reason)) => {
+                    progress.finish();
+                    let pass = prompter.prompt_passphrase(&reason, false)?;
+                    app.compact_archive(&archive, Some(&pass), &progress)?
+                }
+                Err(e) => return Err(e.into()),
+            };
+            progress.finish();
+
+            let after_len = std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0);
+            let saved = before_len.saturating_sub(after_len);
+            println!(
+                "{} Compacted {} ({} live chunks, reclaimed {} B)",
+                style("✔").green().bold(),
+                style(archive.display()).cyan().bold(),
+                manifest.stats.unique_chunks,
+                saved
+            );
         }
 
         Commands::Restore {
@@ -147,7 +200,11 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
             )?;
             progress.finish();
 
-            let prefix = if summary.dry_run { "[DRY RUN] " } else { "" };
+            let prefix = if summary.dry_run {
+                "[DRY RUN] "
+            } else {
+                ""
+            };
             println!(
                 "\n{} {}Restore completed from {}",
                 style("✔").green().bold(),
@@ -217,6 +274,12 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
                 manifest.stats.total_logical_bytes,
                 manifest.stats.compressed_stored_bytes
             );
+            if manifest.stats.reclaimable_chunks > 0 {
+                println!(
+                    "  Reclaimable  : {} dead chunks ({} B)",
+                    manifest.stats.reclaimable_chunks, manifest.stats.reclaimable_bytes
+                );
+            }
 
             if !manifest.files.is_empty() {
                 println!("\n{}", style("Files:").bold().underlined());

@@ -2,13 +2,22 @@ use std::path::PathBuf;
 
 use wbak_domain::{ConflictPolicy, ProfileConfig};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CreateBackupRequest {
     pub profile: ProfileConfig,
     pub output_archive: PathBuf,
     pub passphrase: Option<String>,
     /// Explicit override to allow storing `.ssh` / secret files unencrypted (not recommended).
     pub allow_unencrypted_secrets: bool,
+    /// When false (default) and `output_archive` already exists, `wbak` performs a fast
+    /// incremental update (Strategy 1: In-Place Tail Append), skipping unchanged files.
+    /// Set true (`--full`) to force rebuilding the entire archive from scratch.
+    pub force_full_rebuild: bool,
+    /// When false (default), files deleted on disk since the previous backup are removed from the
+    /// archive manifest. Set true (`--keep-deleted`) to retain deleted files in the manifest.
+    pub keep_deleted: bool,
+    /// When true (`--compact`), automatically compacts reclaimable dead chunks after an incremental update.
+    pub compact_after_update: bool,
 }
 
 #[derive(Debug, Clone)]

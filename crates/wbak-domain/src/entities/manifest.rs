@@ -113,9 +113,26 @@ pub struct ArchiveStats {
     pub deduplicated_plaintext_bytes: u64,
     pub compressed_stored_bytes: u64,
     pub unique_chunks: usize,
+    #[serde(default)]
+    pub reclaimable_chunks: usize,
+    #[serde(default)]
+    pub reclaimable_bytes: u64,
+    #[serde(default)]
+    pub last_incremental: Option<IncrementalStats>,
     pub registry_keys_count: usize,
     pub registry_values_count: usize,
     pub winget_packages_count: usize,
+}
+
+/// Breakdown of changes during an incremental backup update.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncrementalStats {
+    pub files_unchanged: usize,
+    pub files_added: usize,
+    pub files_modified: usize,
+    pub files_deleted: usize,
+    pub bytes_reused: u64,
+    pub bytes_appended: u64,
 }
 
 /// Complete manifest stored in the index section of a `.wbak` archive.
