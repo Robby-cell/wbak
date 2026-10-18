@@ -1,0 +1,14 @@
+[package]
+name = "wbak-gui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wbak-domain.workspace = true
+wbak-app.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+toml.workspace = true
+chrono.workspace = true
+anyhow.workspace = true

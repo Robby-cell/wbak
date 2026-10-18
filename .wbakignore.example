@@ -1,0 +1,27 @@
+# .wbakignore — Example Ignore & Exemption File for wbak
+# Follows .gitignore syntax. Later rules override earlier rules.
+# Prefix a pattern with '!' to exempt matching paths from exclusion.
+
+# 1. Exclude Node.js & Rust build directories
+/node_modules/
+**/node_modules/
+/target/
+**/target/
+
+# 2. Exclude Git object database & virtual environments
+/.git/objects/
+**/.venv/
+**/__pycache__/
+
+# 3. Exclude OS caches, logs, and temporary files
+*.tmp
+*.temp
+*.bak
+*.log
+**/Thumbs.db
+**/desktop.ini
+
+# 4. Exemptions ('!' rescues specific files or directories from being ignored)
+!/target/release/custom-enterprise-tool.exe
+!important-audit.log
+!**/.keep

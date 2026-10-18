@@ -1,0 +1,68 @@
+# wbak.example.toml — Declarative Enterprise & Workstation Backup Profile
+
+[profile]
+name = "enterprise-rust-workstation"
+description = "Reproducible Windows developer workstation backup"
+compression_level = 3
+
+[security]
+# Set true to encrypt the entire archive (all files, registry keys, and manifest index).
+encrypt_full_archive = false
+
+# When true (default), sensitive files such as `.ssh` private keys, `.gnupg`, and certificates
+# have their data chunks encrypted with ChaCha20-Poly1305 + Argon2id automatically,
+# and are restored with strict owner-only Windows NTFS ACL permissions.
+encrypt_sensitive_by_default = true
+
+sensitive_patterns = [
+    "**/.ssh/**",
+    "**/.gnupg/**",
+    "**/.aws/credentials",
+    "**/.kube/config",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.pfx",
+    "**/*.p12",
+    "**/*.kdbx",
+]
+
+[files]
+# Portable tokens (${USERPROFILE}, ${APPDATA}, ${LOCALAPPDATA}, ${PROGRAMDATA}, ${PUBLIC})
+# resolve automatically on the target machine during restore.
+include = [
+    "${USERPROFILE}/.ssh",
+    "${USERPROFILE}/.gitconfig",
+    "${USERPROFILE}/.cargo/config.toml",
+    "${APPDATA}/Code/User/settings.json",
+    "${APPDATA}/Code/User/keybindings.json",
+]
+ignore_file = ".wbakignore"
+respect_local_ignore_files = true
+ignore_patterns = [
+    "/node_modules/",
+    "**/node_modules/",
+    "/target/",
+    "**/target/",
+    "/.git/objects/",
+    "*.tmp",
+    "*.log",
+    "!/target/release/custom-enterprise-tool.exe",
+    "!important-audit.log",
+]
+
+[registry]
+include_keys = [
+    "HKCU\\Environment",
+    "HKCU\\Console",
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+]
+exclude_patterns = [
+    "*\\BagMRU*",
+    "*\\RecentDocs*",
+]
+
+[environment]
+# Capture installed winget package manifest for reproducible application provisioning
+capture_winget = true
+# Capture User & System environment variables
+capture_env_vars = true

@@ -1,0 +1,17 @@
+[package]
+name = "wbak-win"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wbak-domain.workspace = true
+wbak-filter.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+winreg.workspace = true
+globset.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

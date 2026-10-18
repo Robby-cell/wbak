@@ -1,0 +1,71 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wbak-domain",
+    "crates/wbak-app",
+    "crates/wbak-filter",
+    "crates/wbak-crypto",
+    "crates/wbak-storage",
+    "crates/wbak-win",
+    "crates/wbak-cli",
+    "crates/wbak-gui",
+    "bins/wbak",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["wbak contributors"]
+
+[workspace.dependencies]
+# Internal workspace crates
+wbak-domain = { path = "crates/wbak-domain" }
+wbak-app = { path = "crates/wbak-app" }
+wbak-filter = { path = "crates/wbak-filter" }
+wbak-crypto = { path = "crates/wbak-crypto" }
+wbak-storage = { path = "crates/wbak-storage" }
+wbak-win = { path = "crates/wbak-win" }
+wbak-cli = { path = "crates/wbak-cli" }
+wbak-gui = { path = "crates/wbak-gui" }
+
+# Serialization & Config
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Filtering & Pattern Matching
+ignore = "0.4"
+globset = "0.4"
+
+# Crypto & Hashing
+blake3 = "1.5"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.8", features = ["derive"] }
+
+# Compression
+zstd = "0.13"
+
+# Windows APIs
+winreg = "0.52"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+rpassword = "7.3"
+console = "0.15"
+
+# GUI
+eframe = "0.29"
+egui = "0.29"
+rfd = "0.15"
+
+# Utilities & Testing
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3.13"

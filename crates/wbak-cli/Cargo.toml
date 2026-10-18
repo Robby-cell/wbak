@@ -1,0 +1,15 @@
+[package]
+name = "wbak-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wbak-domain.workspace = true
+wbak-app.workspace = true
+clap.workspace = true
+indicatif.workspace = true
+rpassword.workspace = true
+console.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+serde_json.workspace = true

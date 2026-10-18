@@ -1,0 +1,13 @@
+[package]
+name = "wbak-filter"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wbak-domain.workspace = true
+ignore.workspace = true
+globset.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

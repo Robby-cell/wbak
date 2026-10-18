@@ -1,0 +1,13 @@
+[package]
+name = "wbak-crypto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wbak-domain.workspace = true
+blake3.workspace = true
+argon2.workspace = true
+chacha20poly1305.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
