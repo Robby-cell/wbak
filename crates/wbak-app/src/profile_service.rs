@@ -8,16 +8,10 @@ pub struct ProfileService;
 impl ProfileService {
     pub fn load_from_file(path: &Path) -> DomainResult<ProfileConfig> {
         let content = fs::read_to_string(path).map_err(|e| {
-            DomainError::InvalidProfile(format!(
-                "Failed to read profile '{}': {e}",
-                path.display()
-            ))
+            DomainError::InvalidProfile(format!("Failed to read profile '{}': {e}", path.display()))
         })?;
         toml::from_str(&content).map_err(|e| {
-            DomainError::InvalidProfile(format!(
-                "TOML syntax error in '{}': {e}",
-                path.display()
-            ))
+            DomainError::InvalidProfile(format!("TOML syntax error in '{}': {e}", path.display()))
         })
     }
 

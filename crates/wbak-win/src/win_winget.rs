@@ -50,10 +50,8 @@ struct WingetExportPackage {
 
 impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
     fn capture_winget(&self) -> DomainResult<WingetManifest> {
-        let temp_path = std::env::temp_dir().join(format!(
-            "wbak-winget-export-{}.json",
-            std::process::id()
-        ));
+        let temp_path =
+            std::env::temp_dir().join(format!("wbak-winget-export-{}.json", std::process::id()));
 
         let output = Command::new("winget")
             .arg("export")
@@ -105,10 +103,8 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
         }
 
         if let Some(raw_json) = &manifest.raw_winget_export_json {
-            let temp_path = std::env::temp_dir().join(format!(
-                "wbak-winget-import-{}.json",
-                std::process::id()
-            ));
+            let temp_path = std::env::temp_dir()
+                .join(format!("wbak-winget-import-{}.json", std::process::id()));
             std::fs::write(&temp_path, raw_json).map_err(|e| {
                 DomainError::EnvironmentError(format!(
                     "Failed writing temporary winget import file: {e}"
@@ -199,7 +195,11 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
         })
     }
 
-    fn restore_user_env_vars(&self, snapshot: &EnvVarsSnapshot, dry_run: bool) -> DomainResult<usize> {
+    fn restore_user_env_vars(
+        &self,
+        snapshot: &EnvVarsSnapshot,
+        dry_run: bool,
+    ) -> DomainResult<usize> {
         if dry_run {
             return Ok(snapshot.user_vars.len());
         }

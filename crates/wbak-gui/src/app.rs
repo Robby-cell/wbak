@@ -317,12 +317,7 @@ impl WbakGuiApp {
 
         thread::spawn(move || {
             let res = app
-                .preview_scan(
-                    &include,
-                    &patterns,
-                    ignore_file.as_deref(),
-                    respect_local,
-                )
+                .preview_scan(&include, &patterns, ignore_file.as_deref(), respect_local)
                 .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::PreviewCompleted(res));
         });
@@ -694,8 +689,7 @@ impl WbakGuiApp {
             cols[0].label(RichText::new("Registry Exclude Glob Patterns:").strong());
             cols[0].horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.new_reg_exclude_input);
-                if ui.button("+ Exclude").clicked()
-                    && !self.new_reg_exclude_input.trim().is_empty()
+                if ui.button("+ Exclude").clicked() && !self.new_reg_exclude_input.trim().is_empty()
                 {
                     self.profile
                         .registry
@@ -766,21 +760,15 @@ impl WbakGuiApp {
                     for item in &self.browsed_subkeys {
                         ui.horizontal(|ui| {
                             if ui.small_button("+ Include").clicked()
-                                && !self
-                                    .profile
-                                    .registry
-                                    .include_keys
-                                    .contains(&item.full_path)
+                                && !self.profile.registry.include_keys.contains(&item.full_path)
                             {
                                 self.profile
                                     .registry
                                     .include_keys
                                     .push(item.full_path.clone());
                             }
-                            let label = format!(
-                                "📁 {} ({} values)",
-                                item.full_path, item.value_count
-                            );
+                            let label =
+                                format!("📁 {} ({} values)", item.full_path, item.value_count);
                             if ui.selectable_label(false, label).clicked() && item.has_subkeys {
                                 navigate_to = Some(item.subkey_path.clone());
                             }
@@ -843,7 +831,10 @@ impl WbakGuiApp {
             }
 
             if ui
-                .add_enabled(!self.is_busy, egui::Button::new("🔍 Compare Live System (Diff)"))
+                .add_enabled(
+                    !self.is_busy,
+                    egui::Button::new("🔍 Compare Live System (Diff)"),
+                )
                 .clicked()
             {
                 self.is_busy = true;
@@ -864,7 +855,10 @@ impl WbakGuiApp {
             }
 
             if ui
-                .add_enabled(!self.is_busy, egui::Button::new("🛡 Verify BLAKE3 & AEAD Integrity"))
+                .add_enabled(
+                    !self.is_busy,
+                    egui::Button::new("🛡 Verify BLAKE3 & AEAD Integrity"),
+                )
                 .clicked()
             {
                 self.is_busy = true;
@@ -1144,8 +1138,7 @@ impl WbakGuiApp {
                         Ok(cfg) => {
                             self.ignore_patterns_text = cfg.files.ignore_patterns.join("\n");
                             self.profile = cfg;
-                            self.status_line =
-                                format!("Loaded profile from {}", path.display());
+                            self.status_line = format!("Loaded profile from {}", path.display());
                         }
                         Err(e) => self.last_error = Some(e.to_string()),
                     }
@@ -1171,8 +1164,7 @@ impl WbakGuiApp {
 
         ui.separator();
         self.sync_ignore_text_to_profile();
-        let toml_preview =
-            toml::to_string_pretty(&self.profile).unwrap_or_else(|e| e.to_string());
+        let toml_preview = toml::to_string_pretty(&self.profile).unwrap_or_else(|e| e.to_string());
         ScrollArea::vertical()
             .id_salt("toml_preview_scroll")
             .max_height(340.0)

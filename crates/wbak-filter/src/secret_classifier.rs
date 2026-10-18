@@ -27,9 +27,9 @@ impl GlobSensitivityClassifier {
                 })?;
             builder.add(glob);
         }
-        let glob_set = builder
-            .build()
-            .map_err(|e| DomainError::FilterError(format!("Failed to build sensitivity set: {e}")))?;
+        let glob_set = builder.build().map_err(|e| {
+            DomainError::FilterError(format!("Failed to build sensitivity set: {e}"))
+        })?;
 
         Ok(Self { glob_set, enabled })
     }

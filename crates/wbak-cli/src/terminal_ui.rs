@@ -20,7 +20,9 @@ impl Default for CliProgressSink {
 impl CliProgressSink {
     pub fn new() -> Self {
         let pb = ProgressBar::new_spinner();
-        if let Ok(tpl) = ProgressStyle::with_template("{spinner:.cyan} [{bar:30.cyan/blue}] {pos}/{len} {msg}") {
+        if let Ok(tpl) =
+            ProgressStyle::with_template("{spinner:.cyan} [{bar:30.cyan/blue}] {pos}/{len} {msg}")
+        {
             pb.set_style(tpl.progress_chars("=>-"));
         }
         Self {
@@ -73,11 +75,9 @@ impl SecretPromptPort for CliSecretPrompter {
         }
 
         if confirm {
-            let confirm_pass =
-                rpassword::prompt_password("Confirm encryption passphrase: ").map_err(|e| {
-                    DomainError::CryptoError(format!(
-                        "Failed reading confirmation passphrase: {e}"
-                    ))
+            let confirm_pass = rpassword::prompt_password("Confirm encryption passphrase: ")
+                .map_err(|e| {
+                    DomainError::CryptoError(format!("Failed reading confirmation passphrase: {e}"))
                 })?;
             if pass != confirm_pass {
                 return Err(DomainError::CryptoError(

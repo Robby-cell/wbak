@@ -8,9 +8,9 @@ use winreg::RegKey;
 use wbak_app::{CreateBackupRequest, RestoreBackupRequest, WbakApplication};
 use wbak_crypto::WbakCryptoProvider;
 use wbak_domain::{
-    default_sensitive_patterns, ConflictPolicy, DomainError, DriftStatus,
-    EnvironmentBackupConfig, FileBackupConfig, NoopProgressSink, PortablePathTokenizer,
-    ProfileConfig, ProfileMetadata, RegistryBackupConfig, SecurityPolicy, SensitivityLevel,
+    default_sensitive_patterns, ConflictPolicy, DomainError, DriftStatus, EnvironmentBackupConfig,
+    FileBackupConfig, NoopProgressSink, PortablePathTokenizer, ProfileConfig, ProfileMetadata,
+    RegistryBackupConfig, SecurityPolicy, SensitivityLevel,
 };
 use wbak_filter::{GitignoreFilterFactory, GlobSensitivityClassifier};
 use wbak_storage::{WbakArchiveReader, WbakArchiveWriter};
@@ -60,9 +60,8 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
         fake_user_profile.to_string_lossy().to_string(),
     );
     let tokenizer = PortablePathTokenizer::from_map(&env_map);
-    let sensitivity_classifier = Arc::new(
-        GlobSensitivityClassifier::new(&default_sensitive_patterns(), true).unwrap(),
-    );
+    let sensitivity_classifier =
+        Arc::new(GlobSensitivityClassifier::new(&default_sensitive_patterns(), true).unwrap());
     let crypto = Arc::new(WbakCryptoProvider::fast_for_tests());
 
     let app = WbakApplication::new(

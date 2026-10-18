@@ -157,11 +157,13 @@ impl RegistryRepositoryPort for WindowsRegistryRepository {
             ))
         })?;
 
-        writeln!(file, "Windows Registry Editor Version 5.00\r").map_err(|e| {
-            DomainError::RegistryError(format!("Failed writing .reg header: {e}"))
-        })?;
-        writeln!(file, "; Generated automatically by wbak before registry restore\r")
-            .map_err(|e| DomainError::RegistryError(format!("Failed writing .reg comment: {e}")))?;
+        writeln!(file, "Windows Registry Editor Version 5.00\r")
+            .map_err(|e| DomainError::RegistryError(format!("Failed writing .reg header: {e}")))?;
+        writeln!(
+            file,
+            "; Generated automatically by wbak before registry restore\r"
+        )
+        .map_err(|e| DomainError::RegistryError(format!("Failed writing .reg comment: {e}")))?;
 
         for node in live_snapshot.keys.values() {
             writeln!(
@@ -265,7 +267,9 @@ impl RegistryRepositoryPort for WindowsRegistryRepository {
 fn parse_reg_value(raw: &RegValue) -> Option<RegistryValueData> {
     match raw.vtype {
         REG_SZ => Some(RegistryValueData::Sz(decode_utf16_reg_str(&raw.bytes))),
-        REG_EXPAND_SZ => Some(RegistryValueData::ExpandSz(decode_utf16_reg_str(&raw.bytes))),
+        REG_EXPAND_SZ => Some(RegistryValueData::ExpandSz(decode_utf16_reg_str(
+            &raw.bytes,
+        ))),
         REG_MULTI_SZ => Some(RegistryValueData::MultiSz(decode_utf16_multi_str(
             &raw.bytes,
         ))),

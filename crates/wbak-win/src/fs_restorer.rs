@@ -29,10 +29,7 @@ impl WindowsFileRestorer {
         #[cfg(windows)]
         {
             if attributes.hidden {
-                let _ = Command::new("attrib")
-                    .arg("+H")
-                    .arg(target_path)
-                    .output();
+                let _ = Command::new("attrib").arg("+H").arg(target_path).output();
             }
         }
     }

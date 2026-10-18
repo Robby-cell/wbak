@@ -5,9 +5,7 @@ use anyhow::Result;
 use console::style;
 
 use wbak_app::{CreateBackupRequest, ProfileService, RestoreBackupRequest, WbakApplication};
-use wbak_domain::{
-    DriftStatus, FilterDecision, ProfileConfig, SecretPromptPort, SensitivityLevel,
-};
+use wbak_domain::{DriftStatus, FilterDecision, ProfileConfig, SecretPromptPort, SensitivityLevel};
 
 pub use commands::*;
 pub use terminal_ui::*;
@@ -149,11 +147,7 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
             )?;
             progress.finish();
 
-            let prefix = if summary.dry_run {
-                "[DRY RUN] "
-            } else {
-                ""
-            };
+            let prefix = if summary.dry_run { "[DRY RUN] " } else { "" };
             println!(
                 "\n{} {}Restore completed from {}",
                 style("✔").green().bold(),
@@ -204,8 +198,14 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
                 style("📦").bold(),
                 style(archive.display()).cyan().bold()
             );
-            println!("  Profile      : {} ({})", manifest.profile.name, manifest.profile.description);
-            println!("  Created      : {} on {} (user: {})", manifest.created_at, manifest.source_hostname, manifest.source_username);
+            println!(
+                "  Profile      : {} ({})",
+                manifest.profile.name, manifest.profile.description
+            );
+            println!(
+                "  Created      : {} on {} (user: {})",
+                manifest.created_at, manifest.source_hostname, manifest.source_username
+            );
             println!(
                 "  Encryption   : full={}, encrypted_secrets={}",
                 manifest.full_archive_encrypted, manifest.has_encrypted_secrets

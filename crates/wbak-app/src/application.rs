@@ -5,13 +5,12 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use wbak_domain::{
-    is_ssh_path, ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort,
-    ChunkId, CryptoProviderPort, DiffCalculator, DomainError, DomainResult,
-    EnvironmentRepositoryPort, FileNode, FileNodeKind, FileRestorerPort, FileScannerPort,
-    LiveFileProbe, PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent, ProgressPhase,
-    ProgressSinkPort, RegistryBackupConfig, RegistryBrowseItem, RegistryHive,
-    RegistryRepositoryPort, ScannedEntry, ScannedEntryKind, SecretPromptPort, SensitivityLevel,
-    SystemDriftReport,
+    is_ssh_path, ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort, ChunkId,
+    CryptoProviderPort, DiffCalculator, DomainError, DomainResult, EnvironmentRepositoryPort,
+    FileNode, FileNodeKind, FileRestorerPort, FileScannerPort, LiveFileProbe,
+    PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent, ProgressPhase, ProgressSinkPort,
+    RegistryBackupConfig, RegistryBrowseItem, RegistryHive, RegistryRepositoryPort, ScannedEntry,
+    ScannedEntryKind, SecretPromptPort, SensitivityLevel, SystemDriftReport,
 };
 
 use crate::dto::{CreateBackupRequest, RestoreBackupRequest, RestoreSummary};
@@ -236,11 +235,9 @@ impl WbakApplication {
             env_vars,
         };
 
-        let manifest = self.archive_writer.write_archive(
-            &request.output_archive,
-            build_input,
-            progress,
-        )?;
+        let manifest =
+            self.archive_writer
+                .write_archive(&request.output_archive, build_input, progress)?;
 
         progress.on_progress(ProgressEvent {
             phase: ProgressPhase::Completed,
@@ -281,7 +278,9 @@ impl WbakApplication {
         archive_path: &Path,
         passphrase: Option<&str>,
     ) -> DomainResult<SystemDriftReport> {
-        let manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
+        let manifest = self
+            .archive_reader
+            .read_manifest(archive_path, passphrase)?;
 
         let mut live_probes = BTreeMap::new();
         for node in &manifest.files {
@@ -427,8 +426,10 @@ impl WbakApplication {
 
             let total = matching_nodes.len() as u64;
             for (idx, node) in matching_nodes.into_iter().enumerate() {
-                let target_path =
-                    self.resolve_restore_target(&node.logical_path, request.target_dir_override.as_deref());
+                let target_path = self.resolve_restore_target(
+                    &node.logical_path,
+                    request.target_dir_override.as_deref(),
+                );
 
                 progress.on_progress(ProgressEvent {
                     phase: ProgressPhase::RestoringFiles,
