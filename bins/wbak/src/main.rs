@@ -1,12 +1,14 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
 
 use wbak_app::WbakApplication;
-use wbak_cli::{run_cli_command, Cli};
+use wbak_cli::{Cli, run_cli_command};
 use wbak_crypto::WbakCryptoProvider;
-use wbak_domain::{default_sensitive_patterns, PortablePathTokenizer};
+use wbak_domain::{PortablePathTokenizer, default_sensitive_patterns};
 use wbak_filter::{GitignoreFilterFactory, GlobSensitivityClassifier};
 use wbak_gui::launch_gui;
 use wbak_storage::{WbakArchiveReader, WbakArchiveWriter};

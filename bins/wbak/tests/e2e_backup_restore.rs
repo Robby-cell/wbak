@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 use wbak_app::{CreateBackupRequest, RestoreBackupRequest, WbakApplication};
 use wbak_crypto::WbakCryptoProvider;
 use wbak_domain::{
-    default_sensitive_patterns, ConflictPolicy, DomainError, DriftStatus, EnvironmentBackupConfig,
-    FileBackupConfig, NoopProgressSink, PortablePathTokenizer, ProfileConfig, ProfileMetadata,
-    RegistryBackupConfig, SecurityPolicy, SensitivityLevel,
+    ConflictPolicy, DomainError, DriftStatus, EnvironmentBackupConfig, FileBackupConfig,
+    NoopProgressSink, PortablePathTokenizer, ProfileConfig, ProfileMetadata, RegistryBackupConfig,
+    SecurityPolicy, SensitivityLevel, default_sensitive_patterns,
 };
 use wbak_filter::{GitignoreFilterFactory, GlobSensitivityClassifier};
 use wbak_storage::{WbakArchiveReader, WbakArchiveWriter};
@@ -162,9 +162,11 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
     assert!(logical_paths.contains(&"${USERPROFILE}/dev/app/target/release/keep-tool.exe"));
 
     // Verify `node_modules` and `target/debug/app.exe` were ignored!
-    assert!(!logical_paths
-        .iter()
-        .any(|p| p.contains("node_modules") || p.contains("target/debug")));
+    assert!(
+        !logical_paths
+            .iter()
+            .any(|p| p.contains("node_modules") || p.contains("target/debug"))
+    );
 
     // Verify `.ssh/id_ed25519` is flagged as `SensitivityLevel::Secret`
     let ssh_node = manifest
@@ -245,10 +247,12 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
         .unwrap();
 
     // Deleted `keep-tool.exe` must no longer be in the manifest, and dead chunks should be tracked
-    assert!(!updated_manifest
-        .files
-        .iter()
-        .any(|f| f.logical_path.ends_with("keep-tool.exe")));
+    assert!(
+        !updated_manifest
+            .files
+            .iter()
+            .any(|f| f.logical_path.ends_with("keep-tool.exe"))
+    );
     assert!(updated_manifest.stats.reclaimable_chunks >= 2);
 
     // Compact the archive to garbage-collect dead chunks without re-compressing live chunks

@@ -3,8 +3,8 @@ use std::process::Command;
 
 use chrono::Utc;
 use serde::Deserialize;
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 use wbak_domain::{
     DomainError, DomainResult, EnvVarsSnapshot, EnvironmentRepositoryPort, WingetManifest,
@@ -162,7 +162,9 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
                 if let Ok(s) = String::from_utf8(val.bytes.clone()).or_else(|_| {
                     let u16s: Vec<u16> = val
                         .bytes
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|c| u16::from_le_bytes([c[0], c[1]]))
                         .take_while(|&c| c != 0)
                         .collect();
@@ -181,7 +183,9 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
             for (name, val) in sys_env_key.enum_values().flatten() {
                 let u16s: Vec<u16> = val
                     .bytes
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .take_while(|&c| c != 0)
                     .collect();

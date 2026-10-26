@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::services::default_sensitive_patterns;
 
 /// Declarative enterprise & workstation backup profile (`wbak.toml`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ProfileConfig {
     #[serde(default)]
     pub profile: ProfileMetadata,
@@ -17,18 +17,6 @@ pub struct ProfileConfig {
     pub registry: RegistryBackupConfig,
     #[serde(default)]
     pub environment: EnvironmentBackupConfig,
-}
-
-impl Default for ProfileConfig {
-    fn default() -> Self {
-        Self {
-            profile: ProfileMetadata::default(),
-            security: SecurityPolicy::default(),
-            files: FileBackupConfig::default(),
-            registry: RegistryBackupConfig::default(),
-            environment: EnvironmentBackupConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

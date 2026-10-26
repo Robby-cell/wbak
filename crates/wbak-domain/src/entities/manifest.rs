@@ -160,18 +160,13 @@ pub struct ArchiveManifest {
 }
 
 /// Conflict resolution strategy when restoring files onto a target machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConflictPolicy {
     /// Overwrite existing files on disk.
+    #[default]
     Overwrite,
     /// Skip files that already exist on disk.
     SkipExisting,
     /// Rename existing file on disk with a `.wbak.bak` suffix before writing the restored file.
     BackupExisting,
-}
-
-impl Default for ConflictPolicy {
-    fn default() -> Self {
-        Self::Overwrite
-    }
 }

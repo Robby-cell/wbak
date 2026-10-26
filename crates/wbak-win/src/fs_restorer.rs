@@ -76,6 +76,7 @@ impl FileRestorerPort for WindowsFileRestorer {
                     if let Ok(meta) = fs::metadata(target_path) {
                         let mut perms = meta.permissions();
                         if perms.readonly() {
+                            #[allow(clippy::permissions_set_readonly_false)]
                             perms.set_readonly(false);
                             let _ = fs::set_permissions(target_path, perms);
                         }
@@ -84,15 +85,15 @@ impl FileRestorerPort for WindowsFileRestorer {
             }
         }
 
-        if let Some(parent) = target_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    DomainError::FilesystemError(format!(
-                        "Failed to create parent directory '{}': {e}",
-                        parent.display()
-                    ))
-                })?;
-            }
+        if let Some(parent) = target_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).map_err(|e| {
+                DomainError::FilesystemError(format!(
+                    "Failed to create parent directory '{}': {e}",
+                    parent.display()
+                ))
+            })?;
         }
 
         let mut file = File::create(target_path).map_err(|e| {

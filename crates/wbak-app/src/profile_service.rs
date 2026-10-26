@@ -19,10 +19,10 @@ impl ProfileService {
         let toml_str = toml::to_string_pretty(profile).map_err(|e| {
             DomainError::InvalidProfile(format!("Failed to serialize profile to TOML: {e}"))
         })?;
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = fs::create_dir_all(parent);
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            let _ = fs::create_dir_all(parent);
         }
         fs::write(path, toml_str).map_err(|e| {
             DomainError::InvalidProfile(format!(

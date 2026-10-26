@@ -3,8 +3,8 @@ use std::path::Path;
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 use wbak_domain::{
-    classify_builtin_sensitivity, normalize_slashes, DomainError, DomainResult,
-    SensitivityClassifierPort, SensitivityLevel,
+    DomainError, DomainResult, SensitivityClassifierPort, SensitivityLevel,
+    classify_builtin_sensitivity, normalize_slashes,
 };
 
 /// Glob-based sensitivity classifier that detects `.ssh` keys, `.gnupg`, certificates, and custom secret patterns.

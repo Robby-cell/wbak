@@ -126,15 +126,22 @@ mod tests {
         // 3. Manifest and Public files can be read WITHOUT a passphrase
         let loaded_manifest = reader.read_manifest(&archive_path, None).unwrap();
         let public_bytes = reader
-            .extract_file_bytes(&archive_path, &loaded_manifest, &loaded_manifest.files[0], None)
+            .extract_file_bytes(
+                &archive_path,
+                &loaded_manifest,
+                &loaded_manifest.files[0],
+                None,
+            )
             .unwrap();
         assert_eq!(public_bytes, shared_payload);
 
         // 4. Extracting the `.ssh` private key WITHOUT a passphrase fails
         let ssh_node = &loaded_manifest.files[2];
-        assert!(reader
-            .extract_file_bytes(&archive_path, &loaded_manifest, ssh_node, None)
-            .is_err());
+        assert!(
+            reader
+                .extract_file_bytes(&archive_path, &loaded_manifest, ssh_node, None)
+                .is_err()
+        );
 
         // 5. Extracting the `.ssh` private key WITH the passphrase succeeds and verifies BLAKE3 hash
         let ssh_bytes = reader

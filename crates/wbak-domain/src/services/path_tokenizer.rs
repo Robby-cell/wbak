@@ -20,10 +20,10 @@ impl PortablePathTokenizer {
             "PROGRAMDATA",
             "PUBLIC",
         ] {
-            if let Ok(val) = std::env::var(key) {
-                if !val.trim().is_empty() {
-                    vars.insert(key.to_string(), val);
-                }
+            if let Ok(val) = std::env::var(key)
+                && !val.trim().is_empty()
+            {
+                vars.insert(key.to_string(), val);
             }
         }
         Self::from_map(&vars)
@@ -72,11 +72,11 @@ impl PortablePathTokenizer {
             if resolved == *token {
                 resolved = prefix.clone();
                 break;
-            } else if let Some(rest) = resolved.strip_prefix(token) {
-                if rest.starts_with('/') {
-                    resolved = format!("{prefix}{rest}");
-                    break;
-                }
+            } else if let Some(rest) = resolved.strip_prefix(token)
+                && rest.starts_with('/')
+            {
+                resolved = format!("{prefix}{rest}");
+                break;
             }
         }
 

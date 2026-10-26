@@ -1,7 +1,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, Payload},
     ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit, Payload},
 };
 use rand::RngCore;
 
@@ -155,11 +155,15 @@ mod tests {
 
         // Wrong AAD or wrong password must fail authentication
         let wrong_key = provider.derive_key("wrong-password", &salt).unwrap();
-        assert!(provider
-            .decrypt(&wrong_key, &nonce, &ciphertext, aad)
-            .is_err());
-        assert!(provider
-            .decrypt(&key, &nonce, &ciphertext, b"tampered-aad")
-            .is_err());
+        assert!(
+            provider
+                .decrypt(&wrong_key, &nonce, &ciphertext, aad)
+                .is_err()
+        );
+        assert!(
+            provider
+                .decrypt(&key, &nonce, &ciphertext, b"tampered-aad")
+                .is_err()
+        );
     }
 }

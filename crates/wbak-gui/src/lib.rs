@@ -1,6 +1,6 @@
 pub mod app;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use wbak_app::WbakApplication;
 

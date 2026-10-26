@@ -31,26 +31,25 @@ impl CliProgressSink {
     }
 
     pub fn finish(&self) {
-        if let Ok(mut guard) = self.bar.lock() {
-            if let Some(pb) = guard.take() {
-                pb.finish_and_clear();
-            }
+        if let Ok(mut guard) = self.bar.lock()
+            && let Some(pb) = guard.take()
+        {
+            pb.finish_and_clear();
         }
     }
 }
 
 impl ProgressSinkPort for CliProgressSink {
     fn on_progress(&self, event: ProgressEvent) {
-        if let Ok(guard) = self.bar.lock() {
-            if let Some(pb) = guard.as_ref() {
-                if !matches!(event.phase, ProgressPhase::Completed) {
-                    if let Some(total) = event.total {
-                        pb.set_length(total);
-                        pb.set_position(event.current);
-                    }
-                    pb.set_message(event.message);
-                }
+        if let Ok(guard) = self.bar.lock()
+            && let Some(pb) = guard.as_ref()
+            && !matches!(event.phase, ProgressPhase::Completed)
+        {
+            if let Some(total) = event.total {
+                pb.set_length(total);
+                pb.set_position(event.current);
             }
+            pb.set_message(event.message);
         }
     }
 }

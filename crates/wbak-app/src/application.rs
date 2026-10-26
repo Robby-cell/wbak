@@ -5,13 +5,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use wbak_domain::{
-    is_ssh_path, ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort,
-    ChunkId, CryptoProviderPort, DiffCalculator, DomainError, DomainResult,
-    EnvironmentRepositoryPort, FileNode, FileNodeKind, FileRestorerPort, FileScannerPort,
-    IncrementalStats, LiveFileProbe, PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent,
-    ProgressPhase, ProgressSinkPort, RegistryBackupConfig, RegistryBrowseItem, RegistryHive,
-    RegistryRepositoryPort, ScannedEntry, ScannedEntryKind, SecretPromptPort, SensitivityLevel,
-    SystemDriftReport,
+    ArchiveBuildInput, ArchiveManifest, ArchiveReaderPort, ArchiveWriterPort, ChunkId,
+    CryptoProviderPort, DiffCalculator, DomainError, DomainResult, EnvironmentRepositoryPort,
+    FileNode, FileNodeKind, FileRestorerPort, FileScannerPort, IncrementalStats, LiveFileProbe,
+    PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent, ProgressPhase, ProgressSinkPort,
+    RegistryBackupConfig, RegistryBrowseItem, RegistryHive, RegistryRepositoryPort, ScannedEntry,
+    ScannedEntryKind, SecretPromptPort, SensitivityLevel, SystemDriftReport, is_ssh_path,
 };
 
 use crate::dto::{CreateBackupRequest, RestoreBackupRequest, RestoreSummary};
@@ -162,7 +161,12 @@ impl WbakApplication {
 
         let prev_files_map: BTreeMap<String, &FileNode> = previous_manifest
             .as_ref()
-            .map(|m| m.files.iter().map(|f| (f.logical_path.clone(), f)).collect())
+            .map(|m| {
+                m.files
+                    .iter()
+                    .map(|f| (f.logical_path.clone(), f))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let mut seen_logical_paths = BTreeSet::new();
@@ -182,24 +186,21 @@ impl WbakApplication {
                     if let (Some(prev_manifest), Some(prev_node)) = (
                         previous_manifest.as_ref(),
                         prev_files_map.get(&entry.logical_path),
-                    ) {
-                        if let FileNodeKind::RegularFile {
-                            size: prev_size,
-                            chunks: prev_chunks,
-                            content_hash: prev_hash,
-                        } = &prev_node.kind
-                        {
-                            let same_size = *prev_size == size;
-                            let same_mtime =
-                                timestamps_match(prev_node.modified_at, entry.modified_at);
-                            let chunks_present = !prev_chunks.is_empty()
-                                && prev_chunks
-                                    .iter()
-                                    .all(|cid| prev_manifest.chunks.contains_key(cid));
+                    ) && let FileNodeKind::RegularFile {
+                        size: prev_size,
+                        chunks: prev_chunks,
+                        content_hash: prev_hash,
+                    } = &prev_node.kind
+                    {
+                        let same_size = *prev_size == size;
+                        let same_mtime = timestamps_match(prev_node.modified_at, entry.modified_at);
+                        let chunks_present = !prev_chunks.is_empty()
+                            && prev_chunks
+                                .iter()
+                                .all(|cid| prev_manifest.chunks.contains_key(cid));
 
-                            if same_size && same_mtime && chunks_present {
-                                reused = Some((prev_chunks.clone(), prev_hash.clone()));
-                            }
+                        if same_size && same_mtime && chunks_present {
+                            reused = Some((prev_chunks.clone(), prev_hash.clone()));
                         }
                     }
 
@@ -331,11 +332,9 @@ impl WbakApplication {
             previous_manifest,
         };
 
-        let mut manifest = self.archive_writer.write_archive(
-            &request.output_archive,
-            build_input,
-            progress,
-        )?;
+        let mut manifest =
+            self.archive_writer
+                .write_archive(&request.output_archive, build_input, progress)?;
 
         if request.compact_after_update && manifest.stats.reclaimable_chunks > 0 {
             manifest = self.archive_writer.compact_archive(
@@ -400,7 +399,9 @@ impl WbakApplication {
         archive_path: &Path,
         passphrase: Option<&str>,
     ) -> DomainResult<SystemDriftReport> {
-        let manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
+        let manifest = self
+            .archive_reader
+            .read_manifest(archive_path, passphrase)?;
 
         let mut live_probes = BTreeMap::new();
         for node in &manifest.files {
@@ -646,26 +647,26 @@ impl WbakApplication {
             }
         }
 
-        if request.restore_winget {
-            if let Some(winget_manifest) = &manifest.winget {
-                progress.on_progress(ProgressEvent {
-                    phase: ProgressPhase::RestoringWinget,
-                    current: 0,
-                    total: Some(winget_manifest.packages.len() as u64),
-                    message: "Restoring winget packages...".to_string(),
-                });
-                summary.winget_packages_restored = self
-                    .environment
-                    .restore_winget(winget_manifest, request.dry_run)?;
-            }
+        if request.restore_winget
+            && let Some(winget_manifest) = &manifest.winget
+        {
+            progress.on_progress(ProgressEvent {
+                phase: ProgressPhase::RestoringWinget,
+                current: 0,
+                total: Some(winget_manifest.packages.len() as u64),
+                message: "Restoring winget packages...".to_string(),
+            });
+            summary.winget_packages_restored = self
+                .environment
+                .restore_winget(winget_manifest, request.dry_run)?;
         }
 
-        if request.restore_env_vars {
-            if let Some(env_snapshot) = &manifest.env_vars {
-                summary.env_vars_restored = self
-                    .environment
-                    .restore_user_env_vars(env_snapshot, request.dry_run)?;
-            }
+        if request.restore_env_vars
+            && let Some(env_snapshot) = &manifest.env_vars
+        {
+            summary.env_vars_restored = self
+                .environment
+                .restore_user_env_vars(env_snapshot, request.dry_run)?;
         }
 
         progress.on_progress(ProgressEvent {
@@ -692,15 +693,14 @@ impl WbakApplication {
 
         // 1. If all entries in the archive share a common parent directory (e.g. `${USERPROFILE}/Languages`),
         // strip that prefix so `-t Output` extracts directly into `Output/`.
-        if let Some(prefix) = common_parent {
-            if !prefix.is_empty() {
-                let prefix_with_slash = format!("{prefix}/");
-                if let Some(stripped) = norm.strip_prefix(&prefix_with_slash) {
-                    if !stripped.is_empty() {
-                        return override_root
-                            .join(stripped.replace('/', std::path::MAIN_SEPARATOR_STR));
-                    }
-                }
+        if let Some(prefix) = common_parent
+            && !prefix.is_empty()
+        {
+            let prefix_with_slash = format!("{prefix}/");
+            if let Some(stripped) = norm.strip_prefix(&prefix_with_slash)
+                && !stripped.is_empty()
+            {
+                return override_root.join(stripped.replace('/', std::path::MAIN_SEPARATOR_STR));
             }
         }
 
@@ -752,11 +752,11 @@ pub fn compute_common_parent_prefix(files: &[FileNode]) -> Option<String> {
 /// Strips a leading `${TOKEN}/` (e.g. `${USERPROFILE}/`) or Windows drive prefix (`C:/`) from a path.
 pub fn strip_leading_token_or_drive(norm_path: &str) -> &str {
     let s = norm_path.trim_start_matches('/');
-    if s.starts_with("${") {
-        if let Some(close_idx) = s.find('}') {
-            let after = &s[close_idx + 1..];
-            return after.trim_start_matches('/');
-        }
+    if s.starts_with("${")
+        && let Some(close_idx) = s.find('}')
+    {
+        let after = &s[close_idx + 1..];
+        return after.trim_start_matches('/');
     }
     if s.len() >= 2 && s.as_bytes()[1] == b':' {
         return s[2..].trim_start_matches('/');
@@ -803,10 +803,7 @@ mod tests {
         assert_eq!(common.as_deref(), Some("${USERPROFILE}/Languages"));
 
         let prefix = format!("{}/", common.unwrap());
-        assert_eq!(
-            files[0].logical_path.strip_prefix(&prefix),
-            Some("rust")
-        );
+        assert_eq!(files[0].logical_path.strip_prefix(&prefix), Some("rust"));
         assert_eq!(
             files[1].logical_path.strip_prefix(&prefix),
             Some("rust/main.rs")

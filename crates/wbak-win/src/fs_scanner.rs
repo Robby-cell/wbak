@@ -33,6 +33,7 @@ impl WindowsFileScanner {
         &self.tokenizer
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn walk_recursive(
         &self,
         scan_root: &Path,
@@ -195,10 +196,10 @@ impl FileScannerPort for WindowsFileScanner {
                 raw_path.clone()
             };
 
-            if resolved.is_relative() {
-                if let Ok(cwd) = std::env::current_dir() {
-                    resolved = cwd.join(&resolved);
-                }
+            if resolved.is_relative()
+                && let Ok(cwd) = std::env::current_dir()
+            {
+                resolved = cwd.join(&resolved);
             }
 
             if !resolved.exists() {

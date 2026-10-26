@@ -97,15 +97,13 @@ impl WindowsRegistryRepository {
         };
         tree.keys.insert(full_path, node);
 
-        for sub_res in key.enum_keys() {
-            if let Ok(child_name) = sub_res {
-                let next_subkey = if subkey_path.is_empty() {
-                    child_name
-                } else {
-                    format!("{subkey_path}\\{child_name}")
-                };
-                Self::export_recursive(hive, &next_subkey, exclude_set, tree);
-            }
+        for child_name in key.enum_keys().flatten() {
+            let next_subkey = if subkey_path.is_empty() {
+                child_name
+            } else {
+                format!("{subkey_path}\\{child_name}")
+            };
+            Self::export_recursive(hive, &next_subkey, exclude_set, tree);
         }
     }
 }
@@ -144,10 +142,10 @@ impl RegistryRepositoryPort for WindowsRegistryRepository {
             );
         }
 
-        if let Some(parent) = rollback_file_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+        if let Some(parent) = rollback_file_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            let _ = std::fs::create_dir_all(parent);
         }
 
         let mut file = File::create(rollback_file_path).map_err(|e| {
@@ -299,7 +297,9 @@ fn parse_reg_value(raw: &RegValue) -> Option<RegistryValueData> {
 
 fn decode_utf16_reg_str(bytes: &[u8]) -> String {
     let mut u16_slice: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     while u16_slice.last() == Some(&0) {
@@ -310,7 +310,9 @@ fn decode_utf16_reg_str(bytes: &[u8]) -> String {
 
 fn decode_utf16_multi_str(bytes: &[u8]) -> Vec<String> {
     let u16_slice: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     u16_slice

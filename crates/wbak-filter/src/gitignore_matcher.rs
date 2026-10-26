@@ -3,8 +3,8 @@ use std::path::Path;
 use globset::{GlobBuilder, GlobMatcher};
 
 use wbak_domain::{
-    normalize_slashes, DomainError, DomainResult, FilterDecision, PathFilterFactoryPort,
-    PathFilterPort,
+    DomainError, DomainResult, FilterDecision, PathFilterFactoryPort, PathFilterPort,
+    normalize_slashes,
 };
 
 #[derive(Debug, Clone)]
@@ -93,10 +93,10 @@ impl CompiledRule {
         if self.direct_matcher.is_match(rel_path) {
             return true;
         }
-        if let Some(unanchored) = &self.unanchored_matcher {
-            if unanchored.is_match(rel_path) {
-                return true;
-            }
+        if let Some(unanchored) = &self.unanchored_matcher
+            && unanchored.is_match(rel_path)
+        {
+            return true;
         }
         false
     }
@@ -162,18 +162,18 @@ impl GitignoreMatcher {
             }
         }
 
-        if let Some(path) = ignore_file {
-            if path.exists() {
-                let content = std::fs::read_to_string(path).map_err(|e| {
-                    DomainError::FilterError(format!(
-                        "Failed to read ignore file '{}': {e}",
-                        path.display()
-                    ))
-                })?;
-                for line in content.lines() {
-                    if let Some(rule) = CompiledRule::compile(line)? {
-                        rules.push(rule);
-                    }
+        if let Some(path) = ignore_file
+            && path.exists()
+        {
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                DomainError::FilterError(format!(
+                    "Failed to read ignore file '{}': {e}",
+                    path.display()
+                ))
+            })?;
+            for line in content.lines() {
+                if let Some(rule) = CompiledRule::compile(line)? {
+                    rules.push(rule);
                 }
             }
         }

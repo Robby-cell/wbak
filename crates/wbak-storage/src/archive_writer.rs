@@ -36,7 +36,9 @@ impl WbakArchiveWriter {
         self
     }
 
-    fn read_existing_header_and_footer(file: &mut File) -> DomainResult<(ArchiveHeader, ArchiveFooter)> {
+    fn read_existing_header_and_footer(
+        file: &mut File,
+    ) -> DomainResult<(ArchiveHeader, ArchiveFooter)> {
         let len = file
             .metadata()
             .map_err(|e| DomainError::StorageError(format!("Failed reading metadata: {e}")))?
@@ -79,21 +81,20 @@ impl ArchiveWriterPort for WbakArchiveWriter {
             .map(|f| f.logical_path.clone())
             .collect();
 
-        let has_encrypted_secrets =
-            input.encrypt_secrets_by_default && !secret_files.is_empty();
+        let has_encrypted_secrets = input.encrypt_secrets_by_default && !secret_files.is_empty();
 
         // Check whether we can perform Strategy 1: In-Place Tail Append on an existing archive
         let is_incremental = input.previous_manifest.is_some() && output_path.exists();
 
-        if let Some(parent) = output_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    DomainError::StorageError(format!(
-                        "Failed to create output directory '{}': {e}",
-                        parent.display()
-                    ))
-                })?;
-            }
+        if let Some(parent) = output_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                DomainError::StorageError(format!(
+                    "Failed to create output directory '{}': {e}",
+                    parent.display()
+                ))
+            })?;
         }
 
         let (mut writer, salt, mut current_offset, mut chunks_map, prev_had_encrypted_secrets) =
@@ -173,17 +174,11 @@ impl ArchiveWriterPort for WbakArchiveWriter {
                     flags,
                     kdf_salt: salt,
                 };
-                writer
-                    .write_all(&header.to_bytes())
-                    .map_err(|e| DomainError::StorageError(format!("Failed writing header: {e}")))?;
+                writer.write_all(&header.to_bytes()).map_err(|e| {
+                    DomainError::StorageError(format!("Failed writing header: {e}"))
+                })?;
 
-                (
-                    writer,
-                    salt,
-                    HEADER_SIZE as u64,
-                    BTreeMap::new(),
-                    false,
-                )
+                (writer, salt, HEADER_SIZE as u64, BTreeMap::new(), false)
             };
 
         // Determine if any file actually needs encryption (i.e. full archive encryption OR a new/modified secret file)
@@ -226,11 +221,7 @@ impl ArchiveWriterPort for WbakArchiveWriter {
         let mut stats = ArchiveStats {
             registry_keys_count: input.registry.keys.len(),
             registry_values_count: input.registry.total_values(),
-            winget_packages_count: input
-                .winget
-                .as_ref()
-                .map(|w| w.packages.len())
-                .unwrap_or(0),
+            winget_packages_count: input.winget.as_ref().map(|w| w.packages.len()).unwrap_or(0),
             ..Default::default()
         };
 
@@ -308,12 +299,13 @@ impl ArchiveWriterPort for WbakArchiveWriter {
                     let mut actual_size = 0u64;
 
                     loop {
-                        let bytes_read = read_full_chunk(&mut reader, &mut buffer).map_err(|e| {
-                            DomainError::FilesystemError(format!(
-                                "Failed reading '{}': {e}",
-                                node.original_path
-                            ))
-                        })?;
+                        let bytes_read =
+                            read_full_chunk(&mut reader, &mut buffer).map_err(|e| {
+                                DomainError::FilesystemError(format!(
+                                    "Failed reading '{}': {e}",
+                                    node.original_path
+                                ))
+                            })?;
 
                         if bytes_read == 0 {
                             break;
@@ -332,8 +324,8 @@ impl ArchiveWriterPort for WbakArchiveWriter {
                         };
 
                         if needs_store {
-                            let compressed =
-                                zstd::encode_all(slice, input.compression_level).map_err(|e| {
+                            let compressed = zstd::encode_all(slice, input.compression_level)
+                                .map_err(|e| {
                                     DomainError::StorageError(format!(
                                         "Zstd compression failed: {e}"
                                     ))
@@ -528,9 +520,9 @@ impl ArchiveWriterPort for WbakArchiveWriter {
                 .read_exact(&mut raw_payload)
                 .map_err(|e| DomainError::StorageError(format!("Read old chunk failed: {e}")))?;
 
-            writer
-                .write_all(&raw_payload)
-                .map_err(|e| DomainError::StorageError(format!("Write compacted chunk failed: {e}")))?;
+            writer.write_all(&raw_payload).map_err(|e| {
+                DomainError::StorageError(format!("Write compacted chunk failed: {e}"))
+            })?;
 
             let new_desc = ChunkDescriptor {
                 id: cid.clone(),
@@ -593,16 +585,14 @@ impl ArchiveWriterPort for WbakArchiveWriter {
             .write_all(&footer.to_bytes())
             .map_err(|e| DomainError::StorageError(format!("Failed writing footer: {e}")))?;
 
-        writer
-            .flush()
-            .map_err(|e| DomainError::StorageError(format!("Failed flushing compacted file: {e}")))?;
+        writer.flush().map_err(|e| {
+            DomainError::StorageError(format!("Failed flushing compacted file: {e}"))
+        })?;
         drop(writer);
         drop(old_file);
 
         std::fs::rename(&temp_path, archive_path).map_err(|e| {
-            DomainError::StorageError(format!(
-                "Failed replacing archive with compacted file: {e}"
-            ))
+            DomainError::StorageError(format!("Failed replacing archive with compacted file: {e}"))
         })?;
 
         progress.on_progress(ProgressEvent {

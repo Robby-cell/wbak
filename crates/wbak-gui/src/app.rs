@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -411,28 +411,28 @@ impl WbakGuiApp {
                 &mut self.use_portable_tokens,
                 "Tokenize paths (${USERPROFILE}, ${APPDATA}) for reproducible restores",
             );
-            if ui.button("📁 Add Folder...").clicked() {
-                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                    let entry = if self.use_portable_tokens {
-                        self.app.tokenizer().tokenize(&folder)
-                    } else {
-                        folder.to_string_lossy().to_string()
-                    };
-                    if !self.profile.files.include.contains(&entry) {
-                        self.profile.files.include.push(entry);
-                    }
+            if ui.button("📁 Add Folder...").clicked()
+                && let Some(folder) = rfd::FileDialog::new().pick_folder()
+            {
+                let entry = if self.use_portable_tokens {
+                    self.app.tokenizer().tokenize(&folder)
+                } else {
+                    folder.to_string_lossy().to_string()
+                };
+                if !self.profile.files.include.contains(&entry) {
+                    self.profile.files.include.push(entry);
                 }
             }
-            if ui.button("📄 Add File...").clicked() {
-                if let Some(file) = rfd::FileDialog::new().pick_file() {
-                    let entry = if self.use_portable_tokens {
-                        self.app.tokenizer().tokenize(&file)
-                    } else {
-                        file.to_string_lossy().to_string()
-                    };
-                    if !self.profile.files.include.contains(&entry) {
-                        self.profile.files.include.push(entry);
-                    }
+            if ui.button("📄 Add File...").clicked()
+                && let Some(file) = rfd::FileDialog::new().pick_file()
+            {
+                let entry = if self.use_portable_tokens {
+                    self.app.tokenizer().tokenize(&file)
+                } else {
+                    file.to_string_lossy().to_string()
+                };
+                if !self.profile.files.include.contains(&entry) {
+                    self.profile.files.include.push(entry);
                 }
             }
         });
@@ -521,14 +521,13 @@ impl WbakGuiApp {
         ui.horizontal(|ui| {
             ui.label("Output Archive (.wbak):");
             ui.text_edit_singleline(&mut self.backup_output_path);
-            if ui.button("Browse...").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button("Browse...").clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .add_filter("wbak Archive", &["wbak"])
                     .set_file_name("workstation-backup.wbak")
                     .save_file()
-                {
-                    self.backup_output_path = path.to_string_lossy().to_string();
-                }
+            {
+                self.backup_output_path = path.to_string_lossy().to_string();
             }
             let btn = egui::Button::new(RichText::new("▶ Run Backup Now").strong())
                 .fill(Color32::from_rgb(35, 134, 54));
@@ -795,13 +794,12 @@ impl WbakGuiApp {
         ui.horizontal(|ui| {
             ui.label("Archive (.wbak):");
             ui.text_edit_singleline(&mut self.restore_archive_path);
-            if ui.button("Browse...").clicked() {
-                if let Some(file) = rfd::FileDialog::new()
+            if ui.button("Browse...").clicked()
+                && let Some(file) = rfd::FileDialog::new()
                     .add_filter("wbak Archive", &["wbak"])
                     .pick_file()
-                {
-                    self.restore_archive_path = file.to_string_lossy().to_string();
-                }
+            {
+                self.restore_archive_path = file.to_string_lossy().to_string();
             }
             ui.label("Passphrase:");
             ui.add(
@@ -1079,10 +1077,10 @@ impl WbakGuiApp {
             ui.text_edit_singleline(&mut self.restore_path_filter);
             ui.label("Sandbox Target Dir (optional):");
             ui.text_edit_singleline(&mut self.restore_target_override);
-            if ui.button("📁").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    self.restore_target_override = dir.to_string_lossy().to_string();
-                }
+            if ui.button("📁").clicked()
+                && let Some(dir) = rfd::FileDialog::new().pick_folder()
+            {
+                self.restore_target_override = dir.to_string_lossy().to_string();
             }
         });
 
@@ -1132,19 +1130,18 @@ impl WbakGuiApp {
         ui.label("Save or load declarative TOML profiles for repeatable team workstation setup.");
 
         ui.horizontal(|ui| {
-            if ui.button("📂 Load Profile (wbak.toml)...").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button("📂 Load Profile (wbak.toml)...").clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .add_filter("TOML Profile", &["toml"])
                     .pick_file()
-                {
-                    match ProfileService::load_from_file(&path) {
-                        Ok(cfg) => {
-                            self.ignore_patterns_text = cfg.files.ignore_patterns.join("\n");
-                            self.profile = cfg;
-                            self.status_line = format!("Loaded profile from {}", path.display());
-                        }
-                        Err(e) => self.last_error = Some(e.to_string()),
+            {
+                match ProfileService::load_from_file(&path) {
+                    Ok(cfg) => {
+                        self.ignore_patterns_text = cfg.files.ignore_patterns.join("\n");
+                        self.profile = cfg;
+                        self.status_line = format!("Loaded profile from {}", path.display());
                     }
+                    Err(e) => self.last_error = Some(e.to_string()),
                 }
             }
 
