@@ -4002,17 +4002,16 @@ name = "wbak"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
+ "blake3",
  "tempfile",
  "wbak-app",
- "wbak-cli",
  "wbak-crypto",
  "wbak-domain",
  "wbak-filter",
- "wbak-gui",
  "wbak-storage",
  "wbak-win",
  "winreg",
+ "zstd",
 ]
 
 [[package]]
@@ -4041,6 +4040,21 @@ dependencies = [
  "serde_json",
  "wbak-app",
  "wbak-domain",
+]
+
+[[package]]
+name = "wbak-cli-bin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "wbak-app",
+ "wbak-cli",
+ "wbak-crypto",
+ "wbak-domain",
+ "wbak-filter",
+ "wbak-storage",
+ "wbak-win",
 ]
 
 [[package]]
@@ -4091,6 +4105,20 @@ dependencies = [
  "toml",
  "wbak-app",
  "wbak-domain",
+]
+
+[[package]]
+name = "wbak-gui-bin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "wbak-app",
+ "wbak-crypto",
+ "wbak-domain",
+ "wbak-filter",
+ "wbak-gui",
+ "wbak-storage",
+ "wbak-win",
 ]
 
 [[package]]

@@ -9,6 +9,8 @@ members = [
     "crates/wbak-win",
     "crates/wbak-cli",
     "crates/wbak-gui",
+    "bins/wbak-cli",
+    "bins/wbak-gui",
     "bins/wbak",
 ]
 

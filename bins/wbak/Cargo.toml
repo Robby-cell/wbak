@@ -8,17 +8,19 @@ name = "wbak"
 path = "src/main.rs"
 
 [dependencies]
-wbak-domain.workspace = true
-wbak-app.workspace = true
-wbak-filter.workspace = true
-wbak-crypto.workspace = true
-wbak-storage.workspace = true
-wbak-win.workspace = true
-wbak-cli.workspace = true
-wbak-gui.workspace = true
-clap.workspace = true
 anyhow.workspace = true
+zstd.workspace = true
+
+[build-dependencies]
+blake3.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+wbak-app.workspace = true
+wbak-crypto.workspace = true
+wbak-domain.workspace = true
+wbak-filter.workspace = true
+wbak-storage.workspace = true
+wbak-win.workspace = true
 winreg.workspace = true

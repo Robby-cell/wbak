@@ -1,0 +1,18 @@
+[package]
+name = "wbak-gui-bin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "wbak-gui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+wbak-app.workspace = true
+wbak-crypto.workspace = true
+wbak-domain.workspace = true
+wbak-filter.workspace = true
+wbak-gui.workspace = true
+wbak-storage.workspace = true
+wbak-win.workspace = true

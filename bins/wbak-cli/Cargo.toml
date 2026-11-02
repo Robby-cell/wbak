@@ -1,0 +1,19 @@
+[package]
+name = "wbak-cli-bin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "wbak-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+wbak-app.workspace = true
+wbak-cli.workspace = true
+wbak-crypto.workspace = true
+wbak-domain.workspace = true
+wbak-filter.workspace = true
+wbak-storage.workspace = true
+wbak-win.workspace = true
