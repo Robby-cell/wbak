@@ -239,7 +239,9 @@ The GUI provides five workspace tabs:
 | `crates/wbak-win` | **Driven Adapter** | Windows NTFS scanner/restorer, `.ssh` ACL hardening (`icacls`), Registry engine (`winreg`), `winget` integration |
 | `crates/wbak-cli` | **Driving Adapter** | Command-line interface (`clap`, `indicatif`, `rpassword`) |
 | `crates/wbak-gui` | **Driving Adapter** | Native Windows GUI (`eframe` / `egui`, `rfd`) |
-| `bins/wbak` | **Composition Root** | Dependency injection wiring and dual-mode (`CLI` / `GUI`) binary entrypoint |
+| `bins/wbak-cli` | **CLI Binary** | Console-subsystem executable (`wbak-cli.exe`) |
+| `bins/wbak-gui` | **GUI Binary** | Windows-subsystem executable (`wbak-gui.exe`, `#![windows_subsystem = "windows"]`) |
+| `bins/wbak` | **Launcher Bundle** | Single-file Windows-subsystem launcher (`wbak.exe`) embedding compressed `wbak-cli.exe` and `wbak-gui.exe` |
 
 ## License
 
