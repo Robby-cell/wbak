@@ -7,6 +7,7 @@ use wbak_domain::ConflictPolicy;
 #[derive(Debug, Parser)]
 #[command(
     name = "wbak",
+    bin_name = "wbak",
     version,
     about = "Windows Backup & Enterprise Reproducible Environment Tool (CLI + GUI)"
 )]

@@ -79,33 +79,40 @@ fn extract_if_needed(
     Ok(target_path)
 }
 
-fn ensure_bundled_binaries() -> Result<(PathBuf, PathBuf)> {
-    let root = bundle_cache_root();
-    let cache_dir = root.join(BUNDLE_ID);
-
-    let cli_path = extract_if_needed(
-        &cache_dir,
-        "wbak-cli.exe",
-        EMBEDDED_CLI_ZST,
-        cli_expected_len(),
-    )?;
-    let gui_path = extract_if_needed(
-        &cache_dir,
-        "wbak-gui.exe",
-        EMBEDDED_GUI_ZST,
-        gui_expected_len(),
-    )?;
-
-    // Best-effort cleanup of older cached bundle directories
-    if let Ok(entries) = fs::read_dir(&root) {
+fn cleanup_stale_bundles(root: &Path) {
+    if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
             if entry.file_name() != BUNDLE_ID {
                 let _ = fs::remove_dir_all(entry.path());
             }
         }
     }
+}
 
-    Ok((cli_path, gui_path))
+fn ensure_cli_binary() -> Result<PathBuf> {
+    let root = bundle_cache_root();
+    let cache_dir = root.join(BUNDLE_ID);
+    let cli_path = extract_if_needed(
+        &cache_dir,
+        "wbak-cli.exe",
+        EMBEDDED_CLI_ZST,
+        cli_expected_len(),
+    )?;
+    cleanup_stale_bundles(&root);
+    Ok(cli_path)
+}
+
+fn ensure_gui_binary() -> Result<PathBuf> {
+    let root = bundle_cache_root();
+    let cache_dir = root.join(BUNDLE_ID);
+    let gui_path = extract_if_needed(
+        &cache_dir,
+        "wbak-gui.exe",
+        EMBEDDED_GUI_ZST,
+        gui_expected_len(),
+    )?;
+    cleanup_stale_bundles(&root);
+    Ok(gui_path)
 }
 
 #[cfg(windows)]
@@ -253,9 +260,9 @@ mod win_console {
 
 fn run() -> Result<i32> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let (cli_exe, gui_exe) = ensure_bundled_binaries()?;
 
     if should_launch_gui(&args) {
+        let gui_exe = ensure_gui_binary()?;
         Command::new(&gui_exe)
             .spawn()
             .with_context(|| format!("Failed to launch GUI binary at {}", gui_exe.display()))?;
@@ -264,6 +271,7 @@ fn run() -> Result<i32> {
         #[cfg(windows)]
         win_console::attach_for_cli();
 
+        let cli_exe = ensure_cli_binary()?;
         let status = Command::new(&cli_exe)
             .args(&args)
             .status()
@@ -282,5 +290,21 @@ fn main() {
             eprintln!("wbak launcher error: {err:#}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::should_launch_gui;
+
+    #[test]
+    fn launcher_chooses_gui_when_no_args_or_gui_subcommand() {
+        assert!(should_launch_gui(&[]));
+        assert!(should_launch_gui(&[OsString::from("gui")]));
+        assert!(should_launch_gui(&[OsString::from("GUI")]));
+        assert!(!should_launch_gui(&[OsString::from("backup")]));
+        assert!(!should_launch_gui(&[OsString::from("--help")]));
     }
 }
