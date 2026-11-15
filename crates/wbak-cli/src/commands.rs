@@ -151,6 +151,20 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Read a single file's contents from an archive into memory and print to stdout without writing to disk
+    #[command(visible_aliases = ["read", "view"])]
+    Cat {
+        /// Path to the `.wbak` archive
+        archive: PathBuf,
+
+        /// Logical path or filename suffix inside the archive
+        file_path: String,
+
+        /// Passphrase if the file or archive is encrypted
+        #[arg(long)]
+        password: Option<String>,
+    },
+
     /// Compare a `.wbak` archive against the live Windows filesystem, Registry, and `winget` packages
     Diff {
         /// Path to the `.wbak` archive

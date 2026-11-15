@@ -3,12 +3,21 @@ name = "wbak-gui"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["media-viewer"]
+media-viewer = ["dep:image", "dep:rodio", "dep:windows"]
+
 [dependencies]
-wbak-domain.workspace = true
-wbak-app.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
 eframe.workspace = true
 egui.workspace = true
+image = { workspace = true, optional = true }
 rfd.workspace = true
+rodio = { workspace = true, optional = true }
 toml.workspace = true
-chrono.workspace = true
-anyhow.workspace = true
+wbak-app.workspace = true
+wbak-domain.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, optional = true }

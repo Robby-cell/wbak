@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod terminal_ui;
 
+use std::io::Write;
+
 use anyhow::Result;
 use console::style;
 
@@ -311,6 +313,44 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
                     println!("  ... and {} more", wg.packages.len() - 25);
                 }
             }
+        }
+
+        Commands::Cat {
+            archive,
+            file_path,
+            password,
+        } => {
+            let prompter = CliSecretPrompter;
+            let mut active_pass = password;
+
+            let manifest = match app.inspect_archive(&archive, active_pass.as_deref()) {
+                Ok(m) => m,
+                Err(wbak_domain::DomainError::PassphraseRequired(reason)) => {
+                    let pass = prompter.prompt_passphrase(&reason, false)?;
+                    let m = app.inspect_archive(&archive, Some(&pass))?;
+                    active_pass = Some(pass);
+                    m
+                }
+                Err(e) => return Err(e.into()),
+            };
+
+            let (_, bytes) = match app.read_archive_file_bytes(
+                &archive,
+                &manifest,
+                &file_path,
+                active_pass.as_deref(),
+            ) {
+                Ok(res) => res,
+                Err(wbak_domain::DomainError::PassphraseRequired(reason)) => {
+                    let pass = prompter.prompt_passphrase(&reason, false)?;
+                    app.read_archive_file_bytes(&archive, &manifest, &file_path, Some(&pass))?
+                }
+                Err(e) => return Err(e.into()),
+            };
+
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&bytes)?;
+            stdout.flush()?;
         }
 
         Commands::Diff { archive, password } => {

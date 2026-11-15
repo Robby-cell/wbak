@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 wbak-domain.workspace = true
-wbak-crypto.workspace = true
 blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -14,4 +13,6 @@ thiserror.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+wbak-crypto.workspace = true
+
 tempfile.workspace = true

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -9,9 +10,12 @@ use wbak_app::{
     CreateBackupRequest, ProfileService, RestoreBackupRequest, RestoreSummary, WbakApplication,
 };
 use wbak_domain::{
-    ArchiveManifest, ConflictPolicy, DriftStatus, FilterDecision, ProgressEvent, ProgressSinkPort,
-    RegistryBrowseItem, RegistryHive, ScannedEntry, SensitivityLevel, SystemDriftReport,
+    ArchiveManifest, ConflictPolicy, DriftStatus, FilterDecision, FileNodeKind, ProgressEvent,
+    ProgressSinkPort, RegistryBrowseItem, RegistryHive, ScannedEntry, SensitivityLevel,
+    SystemDriftReport,
 };
+
+use crate::viewer_panel::{ContentViewerPanel, ViewerAction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveTab {
@@ -19,6 +23,7 @@ enum ActiveTab {
     IgnoreRules,
     RegistrySelector,
     RestoreAndDiff,
+    ContentViewer,
     EnterpriseProfile,
 }
 
@@ -38,6 +43,9 @@ enum WorkerMessage {
     DiffCompleted(Result<SystemDriftReport, String>),
     RestoreCompleted(Result<RestoreSummary, String>),
     VerifyCompleted(Result<ArchiveManifest, String>),
+    FileLoadedIntoMemory(Result<(String, Arc<[u8]>), String>),
+    PreloadMemoryCompleted(Result<BTreeMap<String, Arc<[u8]>>, String>),
+    ArchiveMutated(Result<(ArchiveManifest, BTreeMap<String, Arc<[u8]>>, String), String>),
 }
 
 struct GuiProgressSink {
@@ -90,6 +98,7 @@ pub struct WbakGuiApp {
     restore_subtab: RestoreSubTab,
     loaded_manifest: Option<ArchiveManifest>,
     loaded_drift: Option<SystemDriftReport>,
+    viewer_panel: ContentViewerPanel,
 
     // Background worker & status bar
     worker_rx: Arc<Mutex<Receiver<WorkerMessage>>>,
@@ -138,6 +147,7 @@ impl WbakGuiApp {
             restore_subtab: RestoreSubTab::Files,
             loaded_manifest: None,
             loaded_drift: None,
+            viewer_panel: ContentViewerPanel::new(),
             worker_rx: Arc::new(Mutex::new(rx)),
             worker_tx: tx,
             is_busy: false,
@@ -215,6 +225,7 @@ impl WbakGuiApp {
                                 manifest.stats.unique_chunks,
                                 manifest.stats.secret_files_count
                             );
+                            self.viewer_panel.on_manifest_loaded(&manifest);
                             self.loaded_manifest = Some(manifest);
                             self.last_error = None;
                         }
@@ -232,6 +243,8 @@ impl WbakGuiApp {
                                 "Loaded archive: {} files, {} registry keys.",
                                 manifest.stats.total_files, manifest.stats.registry_keys_count
                             );
+                            self.viewer_panel.clear_memory_cache();
+                            self.viewer_panel.on_manifest_loaded(&manifest);
                             self.loaded_manifest = Some(manifest);
                             self.last_error = None;
                         }
@@ -295,6 +308,181 @@ impl WbakGuiApp {
                         }
                     }
                 }
+                WorkerMessage::FileLoadedIntoMemory(res) => {
+                    self.is_busy = false;
+                    self.progress_ratio = None;
+                    match res {
+                        Ok((logical_path, bytes)) => {
+                            self.status_line = format!(
+                                "✔ Loaded '{}' ({} B) into memory.",
+                                logical_path,
+                                bytes.len()
+                            );
+                            self.viewer_panel.insert_cached_file(logical_path, bytes);
+                            self.last_error = None;
+                        }
+                        Err(e) => {
+                            self.last_error = Some(e);
+                        }
+                    }
+                }
+                WorkerMessage::PreloadMemoryCompleted(res) => {
+                    self.is_busy = false;
+                    self.progress_ratio = None;
+                    match res {
+                        Ok(map) => {
+                            let count = map.len();
+                            for (k, v) in map {
+                                self.viewer_panel.insert_cached_file(k, v);
+                            }
+                            self.status_line =
+                                format!("✔ Loaded all {count} archive files into RAM.");
+                            self.last_error = None;
+                        }
+                        Err(e) => {
+                            self.last_error = Some(e);
+                        }
+                    }
+                }
+                WorkerMessage::ArchiveMutated(res) => {
+                    self.is_busy = false;
+                    self.progress_ratio = None;
+                    match res {
+                        Ok((manifest, new_mem_files, msg)) => {
+                            for (k, v) in new_mem_files {
+                                self.viewer_panel.insert_cached_file(k, v);
+                            }
+                            self.viewer_panel.on_manifest_loaded(&manifest);
+                            self.loaded_manifest = Some(manifest);
+                            self.status_line = msg;
+                            self.last_error = None;
+                        }
+                        Err(e) => {
+                            self.last_error = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn execute_viewer_action(&mut self, action: ViewerAction) {
+        let Some(manifest) = self.loaded_manifest.clone() else {
+            return;
+        };
+        let archive_path = PathBuf::from(self.restore_archive_path.trim());
+        let pass = if self.restore_passphrase.is_empty() {
+            None
+        } else {
+            Some(self.restore_passphrase.clone())
+        };
+        let app = self.app.clone();
+        let tx = self.worker_tx.clone();
+
+        match action {
+            ViewerAction::LoadFileIntoMemory { logical_path } => {
+                self.is_busy = true;
+                self.last_error = None;
+                self.status_line = format!("Reading '{logical_path}' into memory...");
+                thread::spawn(move || {
+                    let res = app
+                        .read_archive_file_bytes(
+                            &archive_path,
+                            &manifest,
+                            &logical_path,
+                            pass.as_deref(),
+                        )
+                        .map(|(node, vec)| (node.logical_path, Arc::from(vec)))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(WorkerMessage::FileLoadedIntoMemory(res));
+                });
+            }
+            ViewerAction::PreloadAllIntoMemory => {
+                self.is_busy = true;
+                self.last_error = None;
+                self.status_line = "Preloading all archive files into memory...".to_string();
+                thread::spawn(move || {
+                    let progress = GuiProgressSink { tx: tx.clone() };
+                    let res = app
+                        .preload_archive_files_in_memory(
+                            &archive_path,
+                            &manifest,
+                            pass.as_deref(),
+                            &progress,
+                        )
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(WorkerMessage::PreloadMemoryCompleted(res));
+                });
+            }
+            ViewerAction::CreateDirectory { logical_dir } => {
+                self.is_busy = true;
+                self.last_error = None;
+                self.status_line = format!("Creating folder '{logical_dir}' in archive...");
+                thread::spawn(move || {
+                    let progress = GuiProgressSink { tx: tx.clone() };
+                    let res = app
+                        .create_directory_in_archive(
+                            &archive_path,
+                            &logical_dir,
+                            pass.as_deref(),
+                            &progress,
+                        )
+                        .map(|m| {
+                            (
+                                m,
+                                BTreeMap::new(),
+                                format!("✔ Created directory '{logical_dir}' in archive."),
+                            )
+                        })
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(WorkerMessage::ArchiveMutated(res));
+                });
+            }
+            ViewerAction::InjectDroppedPaths {
+                target_logical_dir,
+                paths,
+                encrypt_added,
+            } => {
+                self.is_busy = true;
+                self.last_error = None;
+                let count = paths.len();
+                self.status_line = format!(
+                    "Adding {count} item(s) into '{}'...",
+                    if target_logical_dir.is_empty() {
+                        "/"
+                    } else {
+                        &target_logical_dir
+                    }
+                );
+                thread::spawn(move || {
+                    let progress = GuiProgressSink { tx: tx.clone() };
+                    let res = app
+                        .inject_paths_into_archive(
+                            &archive_path,
+                            &target_logical_dir,
+                            &paths,
+                            pass.as_deref(),
+                            encrypt_added,
+                            &progress,
+                        )
+                        .map(|(m, mem_files)| {
+                            let added_count = mem_files.len();
+                            (
+                                m,
+                                mem_files,
+                                format!(
+                                    "✔ Added {added_count} file(s) into '{}' (and loaded into RAM).",
+                                    if target_logical_dir.is_empty() {
+                                        "/"
+                                    } else {
+                                        &target_logical_dir
+                                    }
+                                ),
+                            )
+                        })
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(WorkerMessage::ArchiveMutated(res));
+                });
             }
         }
     }
@@ -927,6 +1115,7 @@ impl WbakGuiApp {
                 );
             });
 
+            let mut jump_to_view_file: Option<String> = None;
             ScrollArea::vertical()
                 .id_salt("restore_inspector_scroll")
                 .max_height(190.0)
@@ -942,6 +1131,14 @@ impl WbakGuiApp {
                                 continue;
                             }
                             ui.horizontal(|ui| {
+                                if matches!(f.kind, FileNodeKind::RegularFile { .. })
+                                    && ui
+                                        .small_button("👁 View")
+                                        .on_hover_text("Open file in memory in the Content & Media Viewer")
+                                        .clicked()
+                                {
+                                    jump_to_view_file = Some(f.logical_path.clone());
+                                }
                                 if f.is_secret() {
                                     ui.colored_label(
                                         Color32::from_rgb(245, 194, 66),
@@ -1038,6 +1235,13 @@ impl WbakGuiApp {
                         }
                     }
                 });
+
+            if let Some(logical_path) = jump_to_view_file {
+                self.active_tab = ActiveTab::ContentViewer;
+                if let Some(act) = self.viewer_panel.select_and_view(logical_path) {
+                    self.execute_viewer_action(act);
+                }
+            }
         }
 
         ui.separator();
@@ -1125,6 +1329,61 @@ impl WbakGuiApp {
         }
     }
 
+    fn render_content_viewer(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        if !self.viewer_panel.is_video_mode_active() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Archive (.wbak):").strong());
+                ui.text_edit_singleline(&mut self.restore_archive_path);
+                if ui.button("Browse...").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .add_filter("wbak Archive", &["wbak", "bak"])
+                        .pick_file()
+                {
+                    self.restore_archive_path = file.to_string_lossy().to_string();
+                }
+                ui.label("Passphrase:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.restore_passphrase)
+                        .password(true)
+                        .desired_width(130.0),
+                );
+                if ui
+                    .add_enabled(!self.is_busy, egui::Button::new("📦 Load Archive"))
+                    .clicked()
+                {
+                    self.is_busy = true;
+                    self.last_error = None;
+                    let app = self.app.clone();
+                    let path = PathBuf::from(self.restore_archive_path.trim());
+                    let pass = if self.restore_passphrase.is_empty() {
+                        None
+                    } else {
+                        Some(self.restore_passphrase.clone())
+                    };
+                    let tx = self.worker_tx.clone();
+                    thread::spawn(move || {
+                        let res = app
+                            .inspect_archive(&path, pass.as_deref())
+                            .map_err(|e| e.to_string());
+                        let _ = tx.send(WorkerMessage::InspectCompleted(res));
+                    });
+                }
+            });
+
+            ui.separator();
+        }
+
+        let action = self.viewer_panel.render(
+            ctx,
+            ui,
+            self.loaded_manifest.as_ref(),
+            self.is_busy,
+        );
+        if let Some(act) = action {
+            self.execute_viewer_action(act);
+        }
+    }
+
     fn render_enterprise_profile(&mut self, ui: &mut Ui) {
         ui.heading("Enterprise Reproducible Profile (wbak.toml)");
         ui.label("Save or load declarative TOML profiles for repeatable team workstation setup.");
@@ -1185,59 +1444,72 @@ impl eframe::App for WbakGuiApp {
             ctx.request_repaint();
         }
 
-        egui::TopBottomPanel::top("top_nav_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new("🛡 wbak").strong());
-                ui.separator();
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    ActiveTab::BackupComposer,
-                    "📦 Backup Composer",
-                );
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    ActiveTab::IgnoreRules,
-                    "🚫 Ignore Rules (.wbakignore)",
-                );
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    ActiveTab::RegistrySelector,
-                    "🗂 Windows Registry",
-                );
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    ActiveTab::RestoreAndDiff,
-                    "♻ Restore & System Diff",
-                );
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    ActiveTab::EnterpriseProfile,
-                    "🏢 Enterprise Profile (TOML)",
-                );
-            });
-        });
+        let fullscreen_video =
+            self.active_tab == ActiveTab::ContentViewer && self.viewer_panel.is_video_mode_active();
 
-        egui::TopBottomPanel::bottom("bottom_status_bar").show(ctx, |ui| {
-            if let Some(err) = &self.last_error {
-                ui.colored_label(Color32::from_rgb(245, 95, 95), format!("⚠ Error: {err}"));
-            }
-            ui.horizontal(|ui| {
-                if let Some(ratio) = self.progress_ratio {
-                    ui.add(
-                        egui::ProgressBar::new(ratio)
-                            .desired_width(180.0)
-                            .show_percentage(),
+        if !fullscreen_video {
+            egui::TopBottomPanel::top("top_nav_bar").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new("🛡 wbak").strong());
+                    ui.separator();
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::BackupComposer,
+                        "📦 Backup Composer",
                     );
-                }
-                ui.label(&self.status_line);
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::IgnoreRules,
+                        "🚫 Ignore Rules (.wbakignore)",
+                    );
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::RegistrySelector,
+                        "🗂 Windows Registry",
+                    );
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::RestoreAndDiff,
+                        "♻ Restore & System Diff",
+                    );
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::ContentViewer,
+                        "👁 Content & Media Viewer",
+                    );
+                    ui.selectable_value(
+                        &mut self.active_tab,
+                        ActiveTab::EnterpriseProfile,
+                        "🏢 Enterprise Profile (TOML)",
+                    );
+                });
             });
-        });
+        }
+
+        if !fullscreen_video || self.last_error.is_some() {
+            egui::TopBottomPanel::bottom("bottom_status_bar").show(ctx, |ui| {
+                if let Some(err) = &self.last_error {
+                    ui.colored_label(Color32::from_rgb(245, 95, 95), format!("⚠ Error: {err}"));
+                }
+                ui.horizontal(|ui| {
+                    if let Some(ratio) = self.progress_ratio {
+                        ui.add(
+                            egui::ProgressBar::new(ratio)
+                                .desired_width(180.0)
+                                .show_percentage(),
+                        );
+                    }
+                    ui.label(&self.status_line);
+                });
+            });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
             ActiveTab::BackupComposer => self.render_backup_composer(ui),
             ActiveTab::IgnoreRules => self.render_ignore_rules(ui),
             ActiveTab::RegistrySelector => self.render_registry_selector(ui),
             ActiveTab::RestoreAndDiff => self.render_restore_and_diff(ui),
+            ActiveTab::ContentViewer => self.render_content_viewer(ctx, ui),
             ActiveTab::EnterpriseProfile => self.render_enterprise_profile(ui),
         });
     }

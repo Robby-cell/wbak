@@ -269,6 +269,68 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
     assert_eq!(compacted_manifest.stats.reclaimable_bytes, 0);
     assert!(size_after_compact < size_before_compact);
 
+    // 9. Create a folder `${USERPROFILE}/Files/MyImages` in the archive and drag-and-drop a new file into it
+    let _ = app
+        .create_directory_in_archive(
+            &archive_path,
+            "${USERPROFILE}/Files/MyImages",
+            Some("enterprise-pass-999"),
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    let dropped_photo_path = temp.path().join("dropped-photo.png");
+    let fake_png_bytes = b"\x89PNG\r\n\x1a\nFAKE_IN_MEMORY_PHOTO_PAYLOAD";
+    std::fs::write(&dropped_photo_path, fake_png_bytes).unwrap();
+
+    let (injected_manifest, new_mem_map) = app
+        .inject_paths_into_archive(
+            &archive_path,
+            "${USERPROFILE}/Files/MyImages",
+            std::slice::from_ref(&dropped_photo_path),
+            Some("enterprise-pass-999"),
+            true,
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    let expected_logical = "${USERPROFILE}/Files/MyImages/dropped-photo.png";
+    assert_eq!(
+        new_mem_map.get(expected_logical).map(|b| b.as_ref()),
+        Some(fake_png_bytes.as_slice())
+    );
+
+    // Because `encrypt_added_files` was true, reading the injected file without passphrase must require passphrase!
+    let no_pass_err = app
+        .read_archive_file_bytes(&archive_path, &injected_manifest, expected_logical, None)
+        .unwrap_err();
+    assert!(matches!(no_pass_err, DomainError::PassphraseRequired(_)));
+
+    // Reading into memory with passphrase succeeds without writing anything to disk
+    let (node, read_bytes) = app
+        .read_archive_file_bytes(
+            &archive_path,
+            &injected_manifest,
+            "dropped-photo.png",
+            Some("enterprise-pass-999"),
+        )
+        .unwrap();
+    assert_eq!(node.logical_path, expected_logical);
+    assert_eq!(read_bytes, fake_png_bytes);
+
+    let preloaded = app
+        .preload_archive_files_in_memory(
+            &archive_path,
+            &injected_manifest,
+            Some("enterprise-pass-999"),
+            &NoopProgressSink,
+        )
+        .unwrap();
+    assert_eq!(
+        preloaded.get(expected_logical).map(|b| b.as_ref()),
+        Some(fake_png_bytes.as_slice())
+    );
+
     // Clean up test registry key
     let _ = hkcu.delete_subkey_all(reg_subkey);
 }

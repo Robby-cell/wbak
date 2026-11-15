@@ -7,12 +7,16 @@ edition.workspace = true
 name = "wbak-gui"
 path = "src/main.rs"
 
+[features]
+default = ["media-viewer"]
+media-viewer = ["wbak-gui/media-viewer"]
+
 [dependencies]
 anyhow.workspace = true
 wbak-app.workspace = true
 wbak-crypto.workspace = true
 wbak-domain.workspace = true
 wbak-filter.workspace = true
-wbak-gui.workspace = true
+wbak-gui = { workspace = true, default-features = false }
 wbak-storage.workspace = true
 wbak-win.workspace = true

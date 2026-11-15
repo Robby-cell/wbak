@@ -199,6 +199,9 @@ wbak inspect enterprise-env.wbak
 # Export the archive manifest as JSON for scripts/CI
 wbak inspect enterprise-env.wbak --json
 
+# Read any file from the archive directly into memory and stream to stdout (aliases: `view`, `read`)
+wbak cat enterprise-env.wbak .gitconfig
+
 # Compare the archive against the live Windows machine (files, Registry values & winget packages)
 wbak diff enterprise-env.wbak
 
@@ -208,7 +211,7 @@ wbak verify enterprise-env.wbak
 
 ---
 
-### 7. Native Windows GUI Mode
+### 7. Native Windows GUI Mode & In-Memory Media Viewer
 
 Launch the desktop GUI either by double-clicking `wbak.exe` in Explorer, running `wbak` with no arguments, or running:
 
@@ -216,12 +219,23 @@ Launch the desktop GUI either by double-clicking `wbak.exe` in Explorer, running
 wbak gui
 ```
 
-The GUI provides five workspace tabs:
+The GUI provides six workspace tabs:
 1. **📦 Backup Composer**: Add folders/files via native Windows dialogs, toggle quick presets (`.ssh`, VS Code, Documents), configure compression & encryption, and run backups.
 2. **🚫 Ignore Rules (`.wbakignore`)**: Edit ignore and `!` exemption patterns on the left with a live color-coded preview tree on the right.
 3. **🗂 Windows Registry**: Browse live `HKCU`, `HKLM`, `HKCR`, and `HKU` keys interactively and add keys or exclusion globs to your backup.
 4. **♻ Restore & System Diff**: Open any `.wbak` archive, browse its files/Registry/`winget` packages, run a live System Drift (`Diff`) check, and restore selectively.
-5. **🏢 Enterprise Profile (TOML)**: Load, edit, and save `wbak.toml` profiles.
+5. **👁 Content & Media Viewer (In-Memory + Drag & Drop)**:
+   - **Keep Contents in Memory**: Decrypts and decompresses selected files—or the entire archive via **⚡ Keep All Contents in Memory**—into RAM (`Arc<[u8]>`) without writing temporary files to disk.
+   - **Read Files, Photos, Videos & Music in RAM**:
+     - **📄 Text / Code**: Line numbers, live search filter, word wrap, and copy-to-clipboard.
+     - **🖼 Photos & Animated GIFs**: Zoom, pan, fit-to-window, and animated frame playback.
+     - **🎵 Music & Audio**: In-memory playback (`MP3`, `FLAC`, `WAV`, `OGG`, `AAC`/`M4A`) with a 32-band interactive waveform seek bar, volume, and mute controls.
+     - **🎬 Videos**: In-memory video + audio stream playback (`MP4`, `MKV`, `MOV`, `AVI`, `WMV`, `WebM`) powered by pluggable platform decoder traits.
+     - **🔢 Hex Inspector**: Virtual-scrolled hexadecimal & ASCII viewer for binary files.
+   - **Drag & Drop into Any Folder**: Navigate into any virtual folder in the archive (e.g. `Files/MyImages`), create new subfolders (`+ Create Folder`), and drag-and-drop files or folders from Explorer directly into that directory. Dropped files are appended in-place and automatically encrypted when archive encryption or **🔒 Encrypt newly added/dropped files** is active.
+6. **🏢 Enterprise Profile (TOML)**: Load, edit, and save `wbak.toml` profiles.
+
+> **Optional Feature & Cross-Platform Extensibility**: The rich media decoders (`image`, `rodio`, and platform video backend) are gated behind the optional `media-viewer` Cargo feature on `wbak-gui` and `wbak-gui-bin` (enabled by default; disable with `--no-default-features`) and abstracted behind platform-generic traits (`ImageDecoderBackend`, `AudioPlayerBackend`, `VideoDecoderBackend`).
 
 ---
 

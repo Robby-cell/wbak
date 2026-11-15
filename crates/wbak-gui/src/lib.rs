@@ -1,4 +1,6 @@
 pub mod app;
+pub mod viewer;
+pub mod viewer_panel;
 
 use anyhow::{Result, anyhow};
 
@@ -10,8 +12,9 @@ pub fn launch_gui(app: WbakApplication) -> Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("wbak — Windows Backup & Reproducible Environment Tool")
-            .with_inner_size([980.0, 680.0])
-            .with_min_inner_size([760.0, 520.0]),
+            .with_inner_size([1080.0, 720.0])
+            .with_min_inner_size([800.0, 540.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
 

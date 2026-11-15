@@ -10,7 +10,8 @@ use wbak_domain::{
     FileNode, FileNodeKind, FileRestorerPort, FileScannerPort, IncrementalStats, LiveFileProbe,
     PathFilterFactoryPort, PortablePathTokenizer, ProgressEvent, ProgressPhase, ProgressSinkPort,
     RegistryBackupConfig, RegistryBrowseItem, RegistryHive, RegistryRepositoryPort, ScannedEntry,
-    ScannedEntryKind, SecretPromptPort, SensitivityLevel, SystemDriftReport, is_ssh_path,
+    ScannedEntryKind, SecretPromptPort, SensitivityLevel, SystemDriftReport, WindowsFileAttributes,
+    classify_builtin_sensitivity, is_ssh_path,
 };
 
 use crate::dto::{CreateBackupRequest, RestoreBackupRequest, RestoreSummary};
@@ -381,6 +382,183 @@ impl WbakApplication {
         passphrase: Option<&str>,
     ) -> DomainResult<ArchiveManifest> {
         self.archive_reader.read_manifest(archive_path, passphrase)
+    }
+
+    /// Reads and decrypts/decompresses a single file's contents from an archive into memory
+    /// without writing anything to disk.
+    pub fn read_archive_file_bytes(
+        &self,
+        archive_path: &Path,
+        manifest: &ArchiveManifest,
+        logical_path_or_query: &str,
+        passphrase: Option<&str>,
+    ) -> DomainResult<(FileNode, Vec<u8>)> {
+        let query_norm = logical_path_or_query.replace('\\', "/");
+        let node = manifest
+            .files
+            .iter()
+            .find(|n| n.logical_path.eq_ignore_ascii_case(&query_norm))
+            .or_else(|| {
+                manifest.files.iter().find(|n| {
+                    matches!(n.kind, FileNodeKind::RegularFile { .. })
+                        && n.logical_path
+                            .to_ascii_lowercase()
+                            .ends_with(&query_norm.to_ascii_lowercase())
+                })
+            })
+            .ok_or_else(|| {
+                DomainError::StorageError(format!(
+                    "File '{}' not found in archive manifest",
+                    logical_path_or_query
+                ))
+            })?;
+
+        let bytes =
+            self.archive_reader
+                .extract_file_bytes(archive_path, manifest, node, passphrase)?;
+        Ok((node.clone(), bytes))
+    }
+
+    /// Preloads all regular files from an archive into an in-memory map (`logical_path -> Arc<[u8]>`).
+    pub fn preload_archive_files_in_memory(
+        &self,
+        archive_path: &Path,
+        manifest: &ArchiveManifest,
+        passphrase: Option<&str>,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<BTreeMap<String, Arc<[u8]>>> {
+        let regular_files: Vec<&FileNode> = manifest
+            .files
+            .iter()
+            .filter(|n| matches!(n.kind, FileNodeKind::RegularFile { .. }))
+            .collect();
+
+        let total = regular_files.len() as u64;
+        let mut memory_map = BTreeMap::new();
+
+        for (idx, node) in regular_files.into_iter().enumerate() {
+            progress.on_progress(ProgressEvent {
+                phase: ProgressPhase::VerifyingArchive,
+                current: idx as u64 + 1,
+                total: Some(total),
+                message: format!("Loading into memory: {}", node.logical_path),
+            });
+
+            let bytes = self.archive_reader.extract_file_bytes(
+                archive_path,
+                manifest,
+                node,
+                passphrase,
+            )?;
+            memory_map.insert(node.logical_path.clone(), Arc::from(bytes));
+        }
+
+        Ok(memory_map)
+    }
+
+    /// Creates a new virtual directory inside an existing `.wbak` archive via in-place tail update.
+    pub fn create_directory_in_archive(
+        &self,
+        archive_path: &Path,
+        logical_dir_path: &str,
+        passphrase: Option<&str>,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest> {
+        let existing_manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
+        let clean_dir = logical_dir_path.replace('\\', "/").trim_matches('/').to_string();
+        if clean_dir.is_empty() {
+            return Ok(existing_manifest);
+        }
+
+        let mut file_map: BTreeMap<String, FileNode> = existing_manifest
+            .files
+            .iter()
+            .cloned()
+            .map(|f| (f.logical_path.clone(), f))
+            .collect();
+
+        ensure_directory_nodes(&clean_dir, &mut file_map);
+
+        let build_input = ArchiveBuildInput {
+            profile: existing_manifest.profile.clone(),
+            compression_level: existing_manifest.profile.compression_level,
+            encrypt_full_archive: existing_manifest.full_archive_encrypted,
+            encrypt_secrets_by_default: true,
+            passphrase: passphrase.map(ToOwned::to_owned),
+            files: file_map.into_values().collect(),
+            registry: existing_manifest.registry.clone(),
+            winget: existing_manifest.winget.clone(),
+            env_vars: existing_manifest.env_vars.clone(),
+            previous_manifest: Some(existing_manifest),
+        };
+
+        self.archive_writer
+            .write_archive(archive_path, build_input, progress)
+    }
+
+    /// Injects one or more local files or directories (e.g. from drag-and-drop) into `target_logical_dir`
+    /// inside an existing `.wbak` archive using in-place incremental tail append, and returns the
+    /// updated `ArchiveManifest` along with the newly injected files' in-memory byte buffers.
+    pub fn inject_paths_into_archive(
+        &self,
+        archive_path: &Path,
+        target_logical_dir: &str,
+        dropped_paths: &[PathBuf],
+        passphrase: Option<&str>,
+        encrypt_added_files: bool,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<(ArchiveManifest, BTreeMap<String, Arc<[u8]>>)> {
+        let existing_manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
+        let base_dir = target_logical_dir
+            .replace('\\', "/")
+            .trim_matches('/')
+            .to_string();
+
+        let mut file_map: BTreeMap<String, FileNode> = existing_manifest
+            .files
+            .iter()
+            .cloned()
+            .map(|f| (f.logical_path.clone(), f))
+            .collect();
+
+        if !base_dir.is_empty() {
+            ensure_directory_nodes(&base_dir, &mut file_map);
+        }
+
+        let should_encrypt_by_archive_policy = existing_manifest.full_archive_encrypted
+            || encrypt_added_files
+            || (existing_manifest.has_encrypted_secrets
+                && passphrase.map(|p| !p.is_empty()).unwrap_or(false));
+
+        let mut new_memory_files: BTreeMap<String, Arc<[u8]>> = BTreeMap::new();
+        for path in dropped_paths {
+            collect_injected_path(
+                path,
+                &base_dir,
+                should_encrypt_by_archive_policy,
+                &mut file_map,
+                &mut new_memory_files,
+            )?;
+        }
+
+        let build_input = ArchiveBuildInput {
+            profile: existing_manifest.profile.clone(),
+            compression_level: existing_manifest.profile.compression_level,
+            encrypt_full_archive: existing_manifest.full_archive_encrypted,
+            encrypt_secrets_by_default: true,
+            passphrase: passphrase.map(ToOwned::to_owned),
+            files: file_map.into_values().collect(),
+            registry: existing_manifest.registry.clone(),
+            winget: existing_manifest.winget.clone(),
+            env_vars: existing_manifest.env_vars.clone(),
+            previous_manifest: Some(existing_manifest),
+        };
+
+        let updated_manifest =
+            self.archive_writer
+                .write_archive(archive_path, build_input, progress)?;
+
+        Ok((updated_manifest, new_memory_files))
     }
 
     pub fn verify_archive(
@@ -762,6 +940,131 @@ pub fn strip_leading_token_or_drive(norm_path: &str) -> &str {
         return s[2..].trim_start_matches('/');
     }
     s
+}
+
+fn ensure_directory_nodes(dir_path: &str, file_map: &mut BTreeMap<String, FileNode>) {
+    let mut accumulated = String::new();
+    for segment in dir_path.split('/').filter(|s| !s.is_empty()) {
+        if !accumulated.is_empty() {
+            accumulated.push('/');
+        }
+        accumulated.push_str(segment);
+
+        // Skip bare root token (e.g. `${USERPROFILE}`) or drive letter (`C:`)
+        let is_bare_token = accumulated.starts_with("${")
+            && accumulated.ends_with('}')
+            && !accumulated.contains('/');
+        let is_bare_drive = accumulated.len() == 2 && accumulated.as_bytes()[1] == b':';
+        if is_bare_token || is_bare_drive {
+            continue;
+        }
+
+        file_map
+            .entry(accumulated.clone())
+            .or_insert_with(|| FileNode {
+                logical_path: accumulated.clone(),
+                original_path: accumulated.clone(),
+                kind: FileNodeKind::Directory,
+                sensitivity: classify_builtin_sensitivity(&accumulated),
+                attributes: WindowsFileAttributes::default(),
+                modified_at: Some(Utc::now()),
+                created_at: Some(Utc::now()),
+            });
+    }
+}
+
+fn collect_injected_path(
+    source_path: &Path,
+    logical_parent_dir: &str,
+    encrypt_by_policy: bool,
+    file_map: &mut BTreeMap<String, FileNode>,
+    new_memory_files: &mut BTreeMap<String, Arc<[u8]>>,
+) -> DomainResult<()> {
+    let meta = std::fs::metadata(source_path).map_err(|e| {
+        DomainError::StorageError(format!(
+            "Failed reading metadata for dropped path '{}': {e}",
+            source_path.display()
+        ))
+    })?;
+
+    let file_name = source_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| {
+            DomainError::StorageError(format!(
+                "Path '{}' has no file or directory name",
+                source_path.display()
+            ))
+        })?;
+
+    let logical_path = if logical_parent_dir.is_empty() {
+        file_name
+    } else {
+        format!("{logical_parent_dir}/{file_name}")
+    };
+
+    let modified_at = meta.modified().ok().map(DateTime::<Utc>::from);
+    let created_at = meta.created().ok().map(DateTime::<Utc>::from);
+
+    if meta.is_dir() {
+        ensure_directory_nodes(&logical_path, file_map);
+        let dir_entries = std::fs::read_dir(source_path).map_err(|e| {
+            DomainError::StorageError(format!(
+                "Failed reading directory '{}': {e}",
+                source_path.display()
+            ))
+        })?;
+        for entry in dir_entries.flatten() {
+            collect_injected_path(
+                &entry.path(),
+                &logical_path,
+                encrypt_by_policy,
+                file_map,
+                new_memory_files,
+            )?;
+        }
+    } else if meta.is_file() {
+        let bytes = std::fs::read(source_path).map_err(|e| {
+            DomainError::StorageError(format!(
+                "Failed reading file '{}': {e}",
+                source_path.display()
+            ))
+        })?;
+
+        let sensitivity = if encrypt_by_policy {
+            SensitivityLevel::Secret
+        } else {
+            classify_builtin_sensitivity(&logical_path)
+        };
+
+        let size = bytes.len() as u64;
+        new_memory_files.insert(logical_path.clone(), Arc::from(bytes));
+
+        file_map.insert(
+            logical_path.clone(),
+            FileNode {
+                logical_path,
+                original_path: source_path.to_string_lossy().to_string(),
+                kind: FileNodeKind::RegularFile {
+                    size,
+                    chunks: Vec::new(),
+                    content_hash: ChunkId(String::new()),
+                },
+                sensitivity,
+                attributes: WindowsFileAttributes {
+                    readonly: meta.permissions().readonly(),
+                    hidden: false,
+                    system: false,
+                    archive: true,
+                    ..Default::default()
+                },
+                modified_at,
+                created_at,
+            },
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -21,6 +21,11 @@ fn main() {
         "crates/wbak-win/src",
         "crates/wbak-cli/src",
         "crates/wbak-gui/src",
+        "crates/wbak-gui/src/viewer",
+        "crates/wbak-gui/src/viewer/mod.rs",
+        "crates/wbak-gui/src/viewer/backends.rs",
+        "crates/wbak-gui/src/viewer_panel.rs",
+        "crates/wbak-gui/src/app.rs",
         "bins/wbak-cli/src",
         "bins/wbak-gui/src",
     ] {
