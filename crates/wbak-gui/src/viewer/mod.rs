@@ -37,10 +37,7 @@ impl MediaKind {
 /// Classifies a file's content type from its logical path and in-memory byte header.
 pub fn classify_media_kind(logical_path: &str, bytes: &[u8]) -> MediaKind {
     let lower = logical_path.to_ascii_lowercase();
-    let ext = lower
-        .rsplit_once('.')
-        .map(|(_, e)| e)
-        .unwrap_or_default();
+    let ext = lower.rsplit_once('.').map(|(_, e)| e).unwrap_or_default();
 
     match ext {
         "png" | "jpg" | "jpeg" | "webp" | "bmp" | "ico" | "tiff" | "tif" => {
@@ -58,10 +55,10 @@ pub fn classify_media_kind(logical_path: &str, bytes: &[u8]) -> MediaKind {
         "txt" | "md" | "rs" | "toml" | "json" | "yaml" | "yml" | "xml" | "html" | "css" | "js"
         | "ts" | "tsx" | "jsx" | "py" | "c" | "cpp" | "cc" | "h" | "hpp" | "cs" | "go" | "java"
         | "sh" | "ps1" | "bat" | "cmd" | "ini" | "cfg" | "conf" | "log" | "csv" | "sql"
-        | "gitignore" | "wbakignore" | "gitconfig" | "pub" | "pem" | "key" => {
-            if decode_text_preview(bytes).is_some() {
-                return MediaKind::Text;
-            }
+        | "gitignore" | "wbakignore" | "gitconfig" | "pub" | "pem" | "key"
+            if decode_text_preview(bytes).is_some() =>
+        {
+            return MediaKind::Text;
         }
         _ => {}
     }
@@ -102,18 +99,22 @@ pub fn decode_text_preview(bytes: &[u8]) -> Option<String> {
     }
 
     // Check UTF-16 LE BOM
-    if bytes.starts_with(&[0xFF, 0xFE]) && bytes.len() % 2 == 0 {
+    if bytes.starts_with(&[0xFF, 0xFE]) && bytes.len().is_multiple_of(2) {
         let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         return String::from_utf16(&u16s).ok();
     }
 
     // Check UTF-16 BE BOM
-    if bytes.starts_with(&[0xFE, 0xFF]) && bytes.len() % 2 == 0 {
+    if bytes.starts_with(&[0xFE, 0xFF]) && bytes.len().is_multiple_of(2) {
         let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
             .collect();
         return String::from_utf16(&u16s).ok();
@@ -171,7 +172,11 @@ pub trait AudioSession {
 
 /// Platform-agnostic factory for creating in-memory audio sessions.
 pub trait AudioPlayerBackend: Send + Sync {
-    fn open_memory(&self, bytes: Arc<[u8]>, file_name: &str) -> Result<Box<dyn AudioSession>, String>;
+    fn open_memory(
+        &self,
+        bytes: Arc<[u8]>,
+        file_name: &str,
+    ) -> Result<Box<dyn AudioSession>, String>;
 }
 
 #[derive(Debug, Clone)]
@@ -209,7 +214,11 @@ pub trait VideoSession {
 
 /// Platform-agnostic factory for creating in-memory video playback sessions.
 pub trait VideoDecoderBackend: Send + Sync {
-    fn open_memory(&self, bytes: Arc<[u8]>, file_name: &str) -> Result<Box<dyn VideoSession>, String>;
+    fn open_memory(
+        &self,
+        bytes: Arc<[u8]>,
+        file_name: &str,
+    ) -> Result<Box<dyn VideoSession>, String>;
 }
 
 #[cfg(not(feature = "media-viewer"))]
@@ -225,7 +234,11 @@ impl ImageDecoderBackend for UnsupportedImageBackend {
 struct UnsupportedAudioBackend;
 #[cfg(not(feature = "media-viewer"))]
 impl AudioPlayerBackend for UnsupportedAudioBackend {
-    fn open_memory(&self, _bytes: Arc<[u8]>, _file_name: &str) -> Result<Box<dyn AudioSession>, String> {
+    fn open_memory(
+        &self,
+        _bytes: Arc<[u8]>,
+        _file_name: &str,
+    ) -> Result<Box<dyn AudioSession>, String> {
         Err("Audio player feature ('media-viewer') is not enabled in this build.".to_string())
     }
 }
@@ -234,7 +247,11 @@ impl AudioPlayerBackend for UnsupportedAudioBackend {
 struct UnsupportedVideoBackend;
 #[cfg(not(feature = "media-viewer"))]
 impl VideoDecoderBackend for UnsupportedVideoBackend {
-    fn open_memory(&self, _bytes: Arc<[u8]>, _file_name: &str) -> Result<Box<dyn VideoSession>, String> {
+    fn open_memory(
+        &self,
+        _bytes: Arc<[u8]>,
+        _file_name: &str,
+    ) -> Result<Box<dyn VideoSession>, String> {
         Err("Video player feature ('media-viewer') is not enabled in this build.".to_string())
     }
 }

@@ -444,12 +444,9 @@ impl WbakApplication {
                 message: format!("Loading into memory: {}", node.logical_path),
             });
 
-            let bytes = self.archive_reader.extract_file_bytes(
-                archive_path,
-                manifest,
-                node,
-                passphrase,
-            )?;
+            let bytes =
+                self.archive_reader
+                    .extract_file_bytes(archive_path, manifest, node, passphrase)?;
             memory_map.insert(node.logical_path.clone(), Arc::from(bytes));
         }
 
@@ -464,8 +461,13 @@ impl WbakApplication {
         passphrase: Option<&str>,
         progress: &dyn ProgressSinkPort,
     ) -> DomainResult<ArchiveManifest> {
-        let existing_manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
-        let clean_dir = logical_dir_path.replace('\\', "/").trim_matches('/').to_string();
+        let existing_manifest = self
+            .archive_reader
+            .read_manifest(archive_path, passphrase)?;
+        let clean_dir = logical_dir_path
+            .replace('\\', "/")
+            .trim_matches('/')
+            .to_string();
         if clean_dir.is_empty() {
             return Ok(existing_manifest);
         }
@@ -499,6 +501,7 @@ impl WbakApplication {
     /// Injects one or more local files or directories (e.g. from drag-and-drop) into `target_logical_dir`
     /// inside an existing `.wbak` archive using in-place incremental tail append, and returns the
     /// updated `ArchiveManifest` along with the newly injected files' in-memory byte buffers.
+    #[allow(clippy::type_complexity)]
     pub fn inject_paths_into_archive(
         &self,
         archive_path: &Path,
@@ -508,7 +511,9 @@ impl WbakApplication {
         encrypt_added_files: bool,
         progress: &dyn ProgressSinkPort,
     ) -> DomainResult<(ArchiveManifest, BTreeMap<String, Arc<[u8]>>)> {
-        let existing_manifest = self.archive_reader.read_manifest(archive_path, passphrase)?;
+        let existing_manifest = self
+            .archive_reader
+            .read_manifest(archive_path, passphrase)?;
         let base_dir = target_logical_dir
             .replace('\\', "/")
             .trim_matches('/')

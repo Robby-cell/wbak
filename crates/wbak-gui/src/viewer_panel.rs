@@ -7,7 +7,7 @@ use eframe::egui::{
     TextureOptions, Ui, Vec2,
 };
 
-use wbak_app:: compute_common_parent_prefix;
+use wbak_app::compute_common_parent_prefix;
 use wbak_domain::{ArchiveManifest, FileNode, FileNodeKind, SensitivityLevel};
 
 use crate::viewer::{
@@ -106,10 +106,10 @@ impl ContentViewerPanel {
     }
 
     pub fn on_manifest_loaded(&mut self, manifest: &ArchiveManifest) {
-        if self.current_dir.is_empty() {
-            if let Some(common) = compute_common_parent_prefix(&manifest.files) {
-                self.current_dir = common;
-            }
+        if self.current_dir.is_empty()
+            && let Some(common) = compute_common_parent_prefix(&manifest.files)
+        {
+            self.current_dir = common;
         }
         if manifest.full_archive_encrypted || manifest.has_encrypted_secrets {
             self.encrypt_dropped_files = true;
@@ -215,17 +215,21 @@ impl ContentViewerPanel {
                 }
                 Err(error) => LoadedViewerAsset::UnsupportedMedia { error },
             },
-            MediaKind::Audio => match self.backends.audio.open_memory(bytes.clone(), logical_path) {
-                Ok(session) => LoadedViewerAsset::Audio { session },
-                Err(error) => LoadedViewerAsset::UnsupportedMedia { error },
-            },
-            MediaKind::Video => match self.backends.video.open_memory(bytes.clone(), logical_path) {
-                Ok(session) => LoadedViewerAsset::Video {
-                    session,
-                    texture: None,
-                },
-                Err(error) => LoadedViewerAsset::UnsupportedMedia { error },
-            },
+            MediaKind::Audio => {
+                match self.backends.audio.open_memory(bytes.clone(), logical_path) {
+                    Ok(session) => LoadedViewerAsset::Audio { session },
+                    Err(error) => LoadedViewerAsset::UnsupportedMedia { error },
+                }
+            }
+            MediaKind::Video => {
+                match self.backends.video.open_memory(bytes.clone(), logical_path) {
+                    Ok(session) => LoadedViewerAsset::Video {
+                        session,
+                        texture: None,
+                    },
+                    Err(error) => LoadedViewerAsset::UnsupportedMedia { error },
+                }
+            }
         });
     }
 
@@ -243,10 +247,8 @@ impl ContentViewerPanel {
         let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
 
         if !dropped_files.is_empty() && manifest.is_some() && !is_busy {
-            let paths: Vec<std::path::PathBuf> = dropped_files
-                .into_iter()
-                .filter_map(|df| df.path)
-                .collect();
+            let paths: Vec<std::path::PathBuf> =
+                dropped_files.into_iter().filter_map(|df| df.path).collect();
             if !paths.is_empty() {
                 action = Some(ViewerAction::InjectDroppedPaths {
                     target_logical_dir: self.current_dir.clone(),
@@ -352,7 +354,13 @@ impl ContentViewerPanel {
             self.render_directory_entries(&mut cols[0], manifest, available_height, &mut action);
 
             cols[1].set_min_height(available_height);
-            self.render_active_viewer_pane(ctx, &mut cols[1], manifest, available_height, &mut action);
+            self.render_active_viewer_pane(
+                ctx,
+                &mut cols[1],
+                manifest,
+                available_height,
+                &mut action,
+            );
         });
 
         action
@@ -555,7 +563,10 @@ impl ContentViewerPanel {
                     };
                     ui.horizontal(|ui| {
                         if ui
-                            .selectable_label(false, RichText::new(format!("📁 {dir_name}/")).strong())
+                            .selectable_label(
+                                false,
+                                RichText::new(format!("📁 {dir_name}/")).strong(),
+                            )
                             .clicked()
                         {
                             enter_dir = Some(full_sub);
@@ -634,7 +645,9 @@ impl ContentViewerPanel {
             ui.vertical_centered(|ui| {
                 ui.add_space(50.0);
                 ui.spinner();
-                ui.label(format!("Decrypting & decompressing '{selected_path}' into RAM..."));
+                ui.label(format!(
+                    "Decrypting & decompressing '{selected_path}' into RAM..."
+                ));
                 if ui.button("Retry Load into Memory").clicked() {
                     *action = Some(ViewerAction::LoadFileIntoMemory {
                         logical_path: selected_path,
@@ -668,7 +681,10 @@ impl ContentViewerPanel {
             );
             ui.weak(format!("({} in RAM)", format_bytes(bytes.len() as u64)));
             if is_secret {
-                ui.colored_label(Color32::from_rgb(245, 194, 66), "[SECRET 🔒 Decrypted in RAM]");
+                ui.colored_label(
+                    Color32::from_rgb(245, 194, 66),
+                    "[SECRET 🔒 Decrypted in RAM]",
+                );
             }
 
             if ui.small_button("💾 Save Copy As...").clicked() {
@@ -771,8 +787,7 @@ impl ContentViewerPanel {
                                 self.zoom_factor = (self.zoom_factor * 1.25).clamp(0.1, 8.0);
                             }
                             ui.add(
-                                egui::Slider::new(&mut self.zoom_factor, 0.1..=8.0)
-                                    .text("Zoom"),
+                                egui::Slider::new(&mut self.zoom_factor, 0.1..=8.0).text("Zoom"),
                             );
                         }
                     });
@@ -780,14 +795,15 @@ impl ContentViewerPanel {
                     if let Some(tex) = textures.get(*current_frame) {
                         let native_size = tex.size_vec2();
                         let avail = Vec2::new(ui.available_width() - 8.0, body_height - 34.0);
-                        let target_size = if self.fit_to_window && native_size.x > 0.0 && native_size.y > 0.0 {
-                            let scale = (avail.x / native_size.x)
-                                .min(avail.y / native_size.y)
-                                .min(1.0);
-                            native_size * scale
-                        } else {
-                            native_size * self.zoom_factor
-                        };
+                        let target_size =
+                            if self.fit_to_window && native_size.x > 0.0 && native_size.y > 0.0 {
+                                let scale = (avail.x / native_size.x)
+                                    .min(avail.y / native_size.y)
+                                    .min(1.0);
+                                native_size * scale
+                            } else {
+                                native_size * self.zoom_factor
+                            };
 
                         ScrollArea::both()
                             .id_salt("image_viewer_canvas")
@@ -982,7 +998,9 @@ impl ContentViewerPanel {
             ui.vertical_centered(|ui| {
                 ui.add_space(100.0);
                 ui.spinner();
-                ui.label(format!("Decrypting & decompressing '{selected_path}' into RAM..."));
+                ui.label(format!(
+                    "Decrypting & decompressing '{selected_path}' into RAM..."
+                ));
                 if ui.button("Retry Load into Memory").clicked() {
                     *action = Some(ViewerAction::LoadFileIntoMemory {
                         logical_path: selected_path,
@@ -1013,13 +1031,11 @@ impl ContentViewerPanel {
                 ui.colored_label(Color32::from_rgb(245, 194, 66), "[SECRET 🔒]");
             }
 
-            if ui.small_button("💾 Save Copy As...").clicked() {
-                if let Some(save_path) = rfd::FileDialog::new()
-                    .set_file_name(short_name)
-                    .save_file()
-                {
-                    let _ = std::fs::write(save_path, bytes.as_ref());
-                }
+            if ui.small_button("💾 Save Copy As...").clicked()
+                && let Some(save_path) =
+                    rfd::FileDialog::new().set_file_name(short_name).save_file()
+            {
+                let _ = std::fs::write(save_path, bytes.as_ref());
             }
             if ui.small_button("🔢 View Hex").clicked() {
                 self.override_mode = InspectorOverrideMode::Hex;
@@ -1083,8 +1099,7 @@ impl ContentViewerPanel {
                             canvas_rect.size()
                         };
 
-                        let video_rect =
-                            Rect::from_center_size(canvas_rect.center(), draw_size);
+                        let video_rect = Rect::from_center_size(canvas_rect.center(), draw_size);
                         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
                         painter.image(tex.id(), video_rect, uv, Color32::WHITE);
                     } else {
@@ -1318,6 +1333,12 @@ impl ContentViewerPanel {
                     ui.monospace(format!("{offset:08X}  {hex_col} │{ascii_col}│"));
                 }
             });
+    }
+}
+
+impl Default for ContentViewerPanel {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

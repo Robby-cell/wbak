@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 wbak-domain.workspace = true
-ignore.workspace = true
 globset.workspace = true
 thiserror.workspace = true
 

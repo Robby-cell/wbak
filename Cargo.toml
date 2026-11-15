@@ -39,7 +39,7 @@ thiserror = "2.0"
 anyhow = "1.0"
 
 # Filtering & Pattern Matching
-ignore = "0.4"
+# ignore = "0.4"
 globset = "0.4"
 
 # Crypto & Hashing
@@ -65,8 +65,21 @@ console = "0.15"
 eframe = "0.29"
 egui = "0.29"
 rfd = "0.15"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff"] }
-rodio = { version = "0.19", default-features = false, features = ["wav", "flac", "mp3", "vorbis"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "ico",
+    "tiff",
+] }
+rodio = { version = "0.19", default-features = false, features = [
+    "wav",
+    "flac",
+    "mp3",
+    "vorbis",
+] }
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Media_MediaFoundation",

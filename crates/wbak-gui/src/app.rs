@@ -10,7 +10,7 @@ use wbak_app::{
     CreateBackupRequest, ProfileService, RestoreBackupRequest, RestoreSummary, WbakApplication,
 };
 use wbak_domain::{
-    ArchiveManifest, ConflictPolicy, DriftStatus, FilterDecision, FileNodeKind, ProgressEvent,
+    ArchiveManifest, ConflictPolicy, DriftStatus, FileNodeKind, FilterDecision, ProgressEvent,
     ProgressSinkPort, RegistryBrowseItem, RegistryHive, ScannedEntry, SensitivityLevel,
     SystemDriftReport,
 };
@@ -45,6 +45,7 @@ enum WorkerMessage {
     VerifyCompleted(Result<ArchiveManifest, String>),
     FileLoadedIntoMemory(Result<(String, Arc<[u8]>), String>),
     PreloadMemoryCompleted(Result<BTreeMap<String, Arc<[u8]>>, String>),
+    #[allow(clippy::type_complexity)]
     ArchiveMutated(Result<(ArchiveManifest, BTreeMap<String, Arc<[u8]>>, String), String>),
 }
 
@@ -1373,12 +1374,9 @@ impl WbakGuiApp {
             ui.separator();
         }
 
-        let action = self.viewer_panel.render(
-            ctx,
-            ui,
-            self.loaded_manifest.as_ref(),
-            self.is_busy,
-        );
+        let action = self
+            .viewer_panel
+            .render(ctx, ui, self.loaded_manifest.as_ref(), self.is_busy);
         if let Some(act) = action {
             self.execute_viewer_action(act);
         }

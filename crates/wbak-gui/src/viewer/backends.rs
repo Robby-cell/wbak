@@ -31,11 +31,12 @@ impl ImageDecoderBackend for StandardImageBackend {
                 .into_iter()
                 .map(|f| {
                     let (numer, denom) = f.delay().numer_denom_ms();
-                    let delay_ms = if denom > 0 {
-                        (numer / denom).max(20)
-                    } else {
-                        80
-                    };
+                    // let delay_ms = if denom > 0 {
+                    //     (numer / denom).max(20)
+                    // } else {
+                    //     80
+                    // };
+                    let delay_ms = numer.checked_div(denom).map(|n| n.max(20)).unwrap_or(80);
                     let buf = f.into_buffer();
                     DecodedImageFrame {
                         width: buf.width(),
@@ -101,8 +102,7 @@ fn decode_audio_track_in_memory(
         {
             let ch = channels.max(1);
             let sr = sample_rate.max(1);
-            let computed_ms =
-                ((pcm.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
+            let computed_ms = ((pcm.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
             let duration_ms = reported_dur_ms.unwrap_or(computed_ms).max(computed_ms);
             let waveform_bars = compute_waveform_from_i16(&pcm);
             return Ok(DecodedPcmTrack {
@@ -119,26 +119,28 @@ fn decode_audio_track_in_memory(
     // 2. Fallback to Rodio / Symphonia wrapped in `catch_unwind` so internal symphonia decoder
     //    panics (such as `symphonia.rs:44` unreachable SeekError) never crash the application.
     let bytes_for_fallback = bytes.clone();
-    let fallback_res = catch_unwind(AssertUnwindSafe(move || -> Result<DecodedPcmTrack, String> {
-        let decoder = Decoder::new(Cursor::new(bytes_for_fallback))
-            .map_err(|e| format!("Failed decoding audio stream in memory: {e}"))?;
-        let ch = decoder.channels().max(1);
-        let sr = decoder.sample_rate().max(1);
-        let samples: Vec<i16> = decoder.collect();
-        if samples.is_empty() {
-            return Err("Audio stream decoded 0 PCM samples".to_string());
-        }
-        let duration_ms = ((samples.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
-        let waveform_bars = compute_waveform_from_i16(&samples);
-        Ok(DecodedPcmTrack {
-            channels: ch,
-            sample_rate: sr,
-            samples: Arc::new(samples),
-            duration_ms,
-            waveform_bars,
-            backend_name: "Rodio / Symphonia (In-Memory PCM)".to_string(),
-        })
-    }));
+    let fallback_res = catch_unwind(AssertUnwindSafe(
+        move || -> Result<DecodedPcmTrack, String> {
+            let decoder = Decoder::new(Cursor::new(bytes_for_fallback))
+                .map_err(|e| format!("Failed decoding audio stream in memory: {e}"))?;
+            let ch = decoder.channels().max(1);
+            let sr = decoder.sample_rate().max(1);
+            let samples: Vec<i16> = decoder.collect();
+            if samples.is_empty() {
+                return Err("Audio stream decoded 0 PCM samples".to_string());
+            }
+            let duration_ms = ((samples.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
+            let waveform_bars = compute_waveform_from_i16(&samples);
+            Ok(DecodedPcmTrack {
+                channels: ch,
+                sample_rate: sr,
+                samples: Arc::new(samples),
+                duration_ms,
+                waveform_bars,
+                backend_name: "Rodio / Symphonia (In-Memory PCM)".to_string(),
+            })
+        },
+    ));
 
     match fallback_res {
         Ok(res) => res,
@@ -164,7 +166,9 @@ impl ActiveRodioSession {
         let ch = self.track.channels.max(1) as usize;
         let sr = self.track.sample_rate.max(1) as u128;
         let frame_offset = ((start_ms as u128 * sr) / 1000) as usize;
-        let raw_sample_offset = frame_offset.saturating_mul(ch).min(self.track.samples.len());
+        let raw_sample_offset = frame_offset
+            .saturating_mul(ch)
+            .min(self.track.samples.len());
         let aligned_offset = raw_sample_offset - (raw_sample_offset % ch);
 
         let slice = if aligned_offset < self.track.samples.len() {
@@ -257,13 +261,14 @@ impl AudioSession for ActiveRodioSession {
     }
 
     fn status(&mut self) -> AudioStatus {
-        if self.sink.empty() && self.last_resume.is_some() {
-            if let Some(t) = self.last_resume.take() {
-                self.accumulated_ms = self
-                    .accumulated_ms
-                    .saturating_add(t.elapsed().as_millis() as u64)
-                    .min(self.track.duration_ms);
-            }
+        if self.sink.empty()
+            && self.last_resume.is_some()
+            && let Some(t) = self.last_resume.take()
+        {
+            self.accumulated_ms = self
+                .accumulated_ms
+                .saturating_add(t.elapsed().as_millis() as u64)
+                .min(self.track.duration_ms);
         }
         let is_playing = !self.sink.is_paused() && !self.sink.empty();
         AudioStatus {
@@ -308,10 +313,14 @@ fn compute_waveform_from_i16(samples: &[i16]) -> [f32; 32] {
 }
 
 impl AudioPlayerBackend for RodioAudioBackend {
-    fn open_memory(&self, bytes: Arc<[u8]>, file_name: &str) -> Result<Box<dyn AudioSession>, String> {
+    fn open_memory(
+        &self,
+        bytes: Arc<[u8]>,
+        file_name: &str,
+    ) -> Result<Box<dyn AudioSession>, String> {
         let track = decode_audio_track_in_memory(bytes, file_name)?;
 
-        let (stream, stream_handle) = catch_unwind(|| OutputStream::try_default())
+        let (stream, stream_handle) = catch_unwind(OutputStream::try_default)
             .map_err(|_| "Audio output stream initialization panicked".to_string())?
             .map_err(|e| format!("Failed opening system audio output device: {e}"))?;
         let sink = Sink::try_new(&stream_handle)
@@ -339,7 +348,11 @@ impl AudioPlayerBackend for RodioAudioBackend {
 pub struct PlatformVideoBackend;
 
 impl VideoDecoderBackend for PlatformVideoBackend {
-    fn open_memory(&self, bytes: Arc<[u8]>, file_name: &str) -> Result<Box<dyn VideoSession>, String> {
+    fn open_memory(
+        &self,
+        bytes: Arc<[u8]>,
+        file_name: &str,
+    ) -> Result<Box<dyn VideoSession>, String> {
         #[cfg(target_os = "windows")]
         {
             win_mf::WindowsMfVideoSession::open(bytes, file_name)
@@ -489,9 +502,7 @@ mod win_mf {
     ) -> Result<(u16, u32, Vec<i16>, Option<u64>), String> {
         let fname = file_name.to_string();
         let handle = thread::spawn(move || {
-            let res = catch_unwind(AssertUnwindSafe(|| {
-                decode_audio_pcm_on_mta(&bytes, &fname)
-            }));
+            let res = catch_unwind(AssertUnwindSafe(|| decode_audio_pcm_on_mta(&bytes, &fname)));
             match res {
                 Ok(inner) => inner,
                 Err(_) => Err("Media Foundation audio decoder panicked".to_string()),
@@ -539,8 +550,7 @@ mod win_mf {
             let duration_ms = query_duration_ms(&reader);
 
             let mut pcm_samples = Vec::new();
-            let eos_or_err =
-                (MF_SOURCE_READERF_ENDOFSTREAM.0 | MF_SOURCE_READERF_ERROR.0) as u32;
+            let eos_or_err = (MF_SOURCE_READERF_ENDOFSTREAM.0 | MF_SOURCE_READERF_ERROR.0) as u32;
 
             loop {
                 let mut flags: u32 = 0;
@@ -574,7 +584,7 @@ mod win_mf {
                 if buffer.Lock(&mut ptr, None, Some(&mut cur_len)).is_ok() {
                     if !ptr.is_null() && cur_len >= 2 {
                         let byte_slice = std::slice::from_raw_parts(ptr, cur_len as usize);
-                        for chunk in byte_slice.chunks_exact(2) {
+                        for chunk in byte_slice.as_chunks::<2>().0 {
                             pcm_samples.push(i16::from_le_bytes([chunk[0], chunk[1]]));
                         }
                     }
@@ -660,7 +670,9 @@ mod win_mf {
 
             let (init_w, init_h, mut duration_ms) = init_rx
                 .recv_timeout(Duration::from_secs(10))
-                .map_err(|_| "Timed out initializing Media Foundation video decoder".to_string())??;
+                .map_err(|_| {
+                    "Timed out initializing Media Foundation video decoder".to_string()
+                })??;
 
             width.store(init_w, Ordering::Relaxed);
             height.store(init_h, Ordering::Relaxed);
@@ -726,7 +738,9 @@ mod win_mf {
                 .map_err(|e| format!("SetGUID RGB32 failed: {e}"))?;
             reader
                 .SetCurrentMediaType(v_idx, None, &out_type)
-                .map_err(|e| format!("Media Foundation could not configure RGB32 video decoder: {e}"))?;
+                .map_err(|e| {
+                    format!("Media Foundation could not configure RGB32 video decoder: {e}")
+                })?;
 
             let current = reader
                 .GetCurrentMediaType(v_idx)
@@ -743,7 +757,7 @@ mod win_mf {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn video_worker_loop(
         bytes: Arc<[u8]>,
         file_name: String,
@@ -955,10 +969,10 @@ mod win_mf {
                 let s_i = src_row_start + x * 4;
                 let d_i = dst_row_start + x * 4;
                 if s_i + 3 < src.len() {
-                    rgba[d_i] = src[s_i + 2];     // R
+                    rgba[d_i] = src[s_i + 2]; // R
                     rgba[d_i + 1] = src[s_i + 1]; // G
-                    rgba[d_i + 2] = src[s_i];     // B
-                    rgba[d_i + 3] = 255;          // A
+                    rgba[d_i + 2] = src[s_i]; // B
+                    rgba[d_i + 3] = 255; // A
                 }
             }
         }
@@ -1063,13 +1077,13 @@ mod tests {
 
     use windows::Win32::Media::MediaFoundation::{
         IMFAttributes, IMFByteStream, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSinkWriter,
-        MF_BYTESTREAM_CONTENT_TYPE, MF_BYTESTREAM_ORIGIN_NAME, MF_MT_AVG_BITRATE,
-        MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
-        MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
-        MF_TRANSCODE_CONTAINERTYPE, MFCreateAttributes, MFCreateMFByteStreamOnStream,
-        MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
-        MFMediaType_Video, MFSTARTUP_FULL, MFStartup, MFTranscodeContainerType_MPEG4,
-        MFVideoFormat_H264, MFVideoFormat_RGB32, MFVideoInterlace_Progressive,
+        MF_BYTESTREAM_CONTENT_TYPE, MF_BYTESTREAM_ORIGIN_NAME, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE,
+        MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_PIXEL_ASPECT_RATIO,
+        MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_TRANSCODE_CONTAINERTYPE,
+        MFCreateAttributes, MFCreateMFByteStreamOnStream, MFCreateMediaType, MFCreateMemoryBuffer,
+        MFCreateSample, MFCreateSinkWriterFromURL, MFMediaType_Video, MFSTARTUP_FULL, MFStartup,
+        MFTranscodeContainerType_MPEG4, MFVideoFormat_H264, MFVideoFormat_RGB32,
+        MFVideoInterlace_Progressive,
     };
     use windows::Win32::System::Com::{
         COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED, CoInitializeEx, IStream, STATFLAG_NONAME,
@@ -1089,7 +1103,10 @@ mod tests {
 
         let wav = make_test_wav();
         let mf_res = super::decode_audio_track_in_memory(Arc::from(wav), "test.wav");
-        assert!(mf_res.is_ok(), "Expected WAV audio decode in memory to succeed");
+        assert!(
+            mf_res.is_ok(),
+            "Expected WAV audio decode in memory to succeed"
+        );
         let track = mf_res.unwrap();
         assert_eq!(track.channels, 1);
         assert_eq!(track.sample_rate, 8000);
@@ -1127,7 +1144,10 @@ mod tests {
                 session.seek_ms(66);
                 std::thread::sleep(std::time::Duration::from_millis(60));
                 let after_seek = session.poll_frame();
-                assert!(after_seek.is_some(), "Expected video frame after seeking while paused");
+                assert!(
+                    after_seek.is_some(),
+                    "Expected video frame after seeking while paused"
+                );
             }
             Err(e) => panic!("PlatformVideoBackend.open_memory failed: {e}"),
         }
@@ -1165,8 +1185,10 @@ mod tests {
             let mem_stream: IStream = SHCreateMemStream(None).unwrap();
             let byte_stream: IMFByteStream = MFCreateMFByteStreamOnStream(&mem_stream).unwrap();
             if let Ok(bs_attrs) = byte_stream.cast::<IMFAttributes>() {
-                let _ = bs_attrs.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from("sample.mp4"));
-                let _ = bs_attrs.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from("video/mp4"));
+                let _ =
+                    bs_attrs.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from("sample.mp4"));
+                let _ =
+                    bs_attrs.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from("video/mp4"));
             }
 
             let mut sw_attrs: Option<IMFAttributes> = None;
@@ -1187,8 +1209,12 @@ mod tests {
             let par_packed = (1u64 << 32) | 1u64;
 
             let out_type: IMFMediaType = MFCreateMediaType().unwrap();
-            out_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).unwrap();
-            out_type.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264).unwrap();
+            out_type
+                .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                .unwrap();
+            out_type
+                .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264)
+                .unwrap();
             out_type.SetUINT32(&MF_MT_AVG_BITRATE, 400_000).unwrap();
             out_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
@@ -1202,8 +1228,12 @@ mod tests {
             let stream_index = writer.AddStream(&out_type).unwrap();
 
             let in_type: IMFMediaType = MFCreateMediaType().unwrap();
-            in_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).unwrap();
-            in_type.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32).unwrap();
+            in_type
+                .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                .unwrap();
+            in_type
+                .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
+                .unwrap();
             in_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
                 .unwrap();
@@ -1213,17 +1243,19 @@ mod tests {
                 .SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, par_packed)
                 .unwrap();
 
-            writer.SetInputMediaType(stream_index, &in_type, None).unwrap();
+            writer
+                .SetInputMediaType(stream_index, &in_type, None)
+                .unwrap();
             writer.BeginWriting().unwrap();
 
-            let frame_bytes = (width * height * 4) as u32;
+            let frame_bytes = width * height * 4;
             let dur_hns = 333_333i64;
             for i in 0..5i64 {
                 let buf: IMFMediaBuffer = MFCreateMemoryBuffer(frame_bytes).unwrap();
                 let mut ptr = std::ptr::null_mut();
                 buf.Lock(&mut ptr, None, None).unwrap();
                 let slice = std::slice::from_raw_parts_mut(ptr, frame_bytes as usize);
-                for px in slice.chunks_exact_mut(4) {
+                for px in slice.as_chunks_mut::<4>().0 {
                     px[0] = 40;
                     px[1] = 120;
                     px[2] = 220;
@@ -1247,7 +1279,11 @@ mod tests {
             mem_stream.Seek(0, STREAM_SEEK_SET, None).unwrap();
             let mut out = vec![0u8; total_len];
             let mut read = 0u32;
-            let _ = mem_stream.Read(out.as_mut_ptr() as *mut _, total_len as u32, Some(&mut read));
+            let _ = mem_stream.Read(
+                out.as_mut_ptr() as *mut _,
+                total_len as u32,
+                Some(&mut read),
+            );
             out
         })
         .join()
