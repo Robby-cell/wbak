@@ -9,11 +9,11 @@ use wbak_domain::ConflictPolicy;
     name = "wbak",
     bin_name = "wbak",
     version,
-    about = "Windows Backup & Enterprise Reproducible Environment Tool (CLI + GUI)"
+    about = "Windows Backup & Enterprise Reproducible Environment Tool (CLI)"
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -203,9 +203,6 @@ pub enum Commands {
         #[arg(short = 'x', long = "exclude")]
         exclude_patterns: Vec<String>,
     },
-
-    /// Launch the graphical user interface
-    Gui,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

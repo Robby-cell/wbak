@@ -13,15 +13,8 @@ pub use commands::*;
 pub use terminal_ui::*;
 
 /// Executes a CLI command using `WbakApplication`.
-/// Returns `Ok(true)` if the caller should launch the GUI instead.
-pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
-    let Some(cmd) = cli.command else {
-        return Ok(true);
-    };
-
-    match cmd {
-        Commands::Gui => return Ok(true),
-
+pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<()> {
+    match cli.command {
         Commands::Init { profile, ignore } => {
             ProfileService::write_starter_templates(&profile, &ignore)?;
             println!(
@@ -243,7 +236,7 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
             let manifest = app.inspect_archive(&archive, password.as_deref())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&manifest)?);
-                return Ok(false);
+                return Ok(());
             }
 
             println!(
@@ -512,5 +505,5 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<bool> {
         }
     }
 
-    Ok(false)
+    Ok(())
 }

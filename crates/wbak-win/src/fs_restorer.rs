@@ -1,5 +1,7 @@
 use std::fs::{self, File};
 use std::io::Write;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,6 +10,9 @@ use chrono::{DateTime, Utc};
 use wbak_domain::{
     ConflictPolicy, DomainError, DomainResult, FileRestorerPort, WindowsFileAttributes,
 };
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Default, Clone)]
 pub struct WindowsFileRestorer;
@@ -29,7 +34,11 @@ impl WindowsFileRestorer {
         #[cfg(windows)]
         {
             if attributes.hidden {
-                let _ = Command::new("attrib").arg("+H").arg(target_path).output();
+                let _ = Command::new("attrib")
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .arg("+H")
+                    .arg(target_path)
+                    .output();
             }
         }
     }
@@ -170,6 +179,7 @@ impl FileRestorerPort for WindowsFileRestorer {
                 // satisfying Windows OpenSSH strict private key permission checks.
                 let grant_arg = format!("{username}:(F)");
                 let _ = Command::new("icacls")
+                    .creation_flags(CREATE_NO_WINDOW)
                     .arg(target_path)
                     .arg("/inheritance:r")
                     .arg("/grant:r")

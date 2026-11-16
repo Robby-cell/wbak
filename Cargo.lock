@@ -4424,16 +4424,16 @@ name = "wbak"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "blake3",
+ "clap",
  "tempfile",
  "wbak-app",
+ "wbak-cli",
  "wbak-crypto",
  "wbak-domain",
  "wbak-filter",
  "wbak-storage",
  "wbak-win",
  "winreg",
- "zstd",
 ]
 
 [[package]]
@@ -4461,21 +4461,6 @@ dependencies = [
  "serde_json",
  "wbak-app",
  "wbak-domain",
-]
-
-[[package]]
-name = "wbak-cli-bin"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "wbak-app",
- "wbak-cli",
- "wbak-crypto",
- "wbak-domain",
- "wbak-filter",
- "wbak-storage",
- "wbak-win",
 ]
 
 [[package]]

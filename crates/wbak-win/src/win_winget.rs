@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use chrono::Utc;
@@ -10,6 +12,9 @@ use wbak_domain::{
     DomainError, DomainResult, EnvVarsSnapshot, EnvironmentRepositoryPort, WingetManifest,
     WingetPackage,
 };
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Default, Clone)]
 pub struct WindowsEnvironmentRepository;
@@ -53,7 +58,10 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
         let temp_path =
             std::env::temp_dir().join(format!("wbak-winget-export-{}.json", std::process::id()));
 
-        let output = Command::new("winget")
+        let mut cmd = Command::new("winget");
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let output = cmd
             .arg("export")
             .arg("-o")
             .arg(&temp_path)

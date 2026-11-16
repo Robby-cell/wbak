@@ -9,18 +9,15 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-zstd.workspace = true
-
-[build-dependencies]
-blake3.workspace = true
-zstd.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
+clap.workspace = true
 wbak-app.workspace = true
+wbak-cli.workspace = true
 wbak-crypto.workspace = true
 wbak-domain.workspace = true
 wbak-filter.workspace = true
 wbak-storage.workspace = true
 wbak-win.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 winreg.workspace = true
