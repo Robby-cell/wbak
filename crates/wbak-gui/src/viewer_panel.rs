@@ -92,7 +92,7 @@ impl ContentViewerPanel {
             selected_file: None,
             path_filter: String::new(),
             new_subfolder_name: String::new(),
-            encrypt_dropped_files: true,
+            encrypt_dropped_files: false,
             active_asset_path: None,
             active_media_kind: MediaKind::Binary,
             override_mode: InspectorOverrideMode::Auto,

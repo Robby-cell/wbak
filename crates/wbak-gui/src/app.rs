@@ -139,7 +139,7 @@ impl WbakGuiApp {
             restore_passphrase: String::new(),
             restore_target_override: String::new(),
             restore_files: true,
-            restore_registry: true,
+            restore_registry: false,
             restore_winget: false,
             restore_env_vars: false,
             restore_dry_run: false,
