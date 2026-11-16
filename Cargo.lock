@@ -4420,7 +4420,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "wbak"
+name = "wbak-app"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "thiserror 2.0.21",
+ "toml",
+ "wbak-domain",
+ "zeroize",
+]
+
+[[package]]
+name = "wbak-bin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4434,18 +4446,6 @@ dependencies = [
  "wbak-storage",
  "wbak-win",
  "winreg",
-]
-
-[[package]]
-name = "wbak-app"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "thiserror 2.0.21",
- "toml",
- "wbak-domain",
- "zeroize",
 ]
 
 [[package]]

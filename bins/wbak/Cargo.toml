@@ -1,5 +1,5 @@
 [package]
-name = "wbak"
+name = "wbak-bin"
 version.workspace = true
 edition.workspace = true
 

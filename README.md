@@ -27,6 +27,7 @@ cargo build --release
 ```
 
 The standalone executable is produced at `target\release\wbak.exe`.
+There is also a GUI, at `target\release\wbak-gui.exe`.
 
 ---
 
@@ -213,10 +214,10 @@ wbak verify enterprise-env.wbak
 
 ### 7. Native Windows GUI Mode & In-Memory Media Viewer
 
-Launch the desktop GUI either by double-clicking `wbak.exe` in Explorer, running `wbak` with no arguments, or running:
+Launch the desktop GUI either by double-clicking `wbak-gui.exe` in Explorer, or by running `wbak-gui` in the terminal:
 
 ```powershell
-wbak gui
+wbak-gui
 ```
 
 The GUI provides six workspace tabs:
@@ -253,9 +254,8 @@ The GUI provides six workspace tabs:
 | `crates/wbak-win` | **Driven Adapter** | Windows NTFS scanner/restorer, `.ssh` ACL hardening (`icacls`), Registry engine (`winreg`), `winget` integration |
 | `crates/wbak-cli` | **Driving Adapter** | Command-line interface (`clap`, `indicatif`, `rpassword`) |
 | `crates/wbak-gui` | **Driving Adapter** | Native Windows GUI (`eframe` / `egui`, `rfd`) |
-| `bins/wbak-cli` | **CLI Binary** | Console-subsystem executable (`wbak-cli.exe`) |
-| `bins/wbak-gui` | **GUI Binary** | Windows-subsystem executable (`wbak-gui.exe`, `#![windows_subsystem = "windows"]`) |
-| `bins/wbak` | **Launcher Bundle** | Single-file Windows-subsystem launcher (`wbak.exe`) embedding compressed `wbak-cli.exe` and `wbak-gui.exe` |
+| `bins/wbak-gui` | **GUI Binary** | Windows-subsystem executable (`wbak-gui.exe`) |
+| `bins/wbak` | **Launcher Bundle** | Console-subsystem executable (`wbak.exe`) |
 
 ## License
 
