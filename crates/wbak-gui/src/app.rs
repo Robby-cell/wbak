@@ -47,6 +47,8 @@ enum WorkerMessage {
     PreloadMemoryCompleted(Result<BTreeMap<String, Arc<[u8]>>, String>),
     #[allow(clippy::type_complexity)]
     ArchiveMutated(Result<(ArchiveManifest, BTreeMap<String, Arc<[u8]>>, String), String>),
+    ItemsRemoved(Result<(ArchiveManifest, Vec<String>, String), String>),
+    PasswordChanged(Result<(ArchiveManifest, String), String>),
 }
 
 struct GuiProgressSink {
@@ -88,6 +90,8 @@ pub struct WbakGuiApp {
     // Restore & Inspect state
     restore_archive_path: String,
     restore_passphrase: String,
+    new_archive_passphrase: String,
+    show_change_password_panel: bool,
     restore_target_override: String,
     restore_files: bool,
     restore_registry: bool,
@@ -137,6 +141,8 @@ impl WbakGuiApp {
             new_reg_exclude_input: String::new(),
             restore_archive_path: "workstation-backup.wbak".to_string(),
             restore_passphrase: String::new(),
+            new_archive_passphrase: String::new(),
+            show_change_password_panel: false,
             restore_target_override: String::new(),
             restore_files: true,
             restore_registry: false,
@@ -363,6 +369,41 @@ impl WbakGuiApp {
                         }
                     }
                 }
+                WorkerMessage::ItemsRemoved(res) => {
+                    self.is_busy = false;
+                    self.progress_ratio = None;
+                    match res {
+                        Ok((manifest, removed_paths, msg)) => {
+                            self.viewer_panel.prune_removed_paths(&removed_paths);
+                            self.viewer_panel.on_manifest_loaded(&manifest);
+                            self.loaded_manifest = Some(manifest);
+                            self.status_line = msg;
+                            self.last_error = None;
+                        }
+                        Err(e) => {
+                            self.last_error = Some(e);
+                        }
+                    }
+                }
+                WorkerMessage::PasswordChanged(res) => {
+                    self.is_busy = false;
+                    self.progress_ratio = None;
+                    match res {
+                        Ok((manifest, new_pass)) => {
+                            self.restore_passphrase = new_pass;
+                            self.new_archive_passphrase.clear();
+                            self.show_change_password_panel = false;
+                            self.viewer_panel.on_manifest_loaded(&manifest);
+                            self.loaded_manifest = Some(manifest);
+                            self.status_line =
+                                "✔ Archive password changed successfully.".to_string();
+                            self.last_error = None;
+                        }
+                        Err(e) => {
+                            self.last_error = Some(e);
+                        }
+                    }
+                }
             }
         }
     }
@@ -485,7 +526,103 @@ impl WbakGuiApp {
                     let _ = tx.send(WorkerMessage::ArchiveMutated(res));
                 });
             }
+            ViewerAction::RemoveItems { logical_paths } => {
+                self.is_busy = true;
+                self.last_error = None;
+                self.status_line =
+                    format!("Removing {} item(s) from archive...", logical_paths.len());
+                let targets_for_worker = logical_paths.clone();
+                thread::spawn(move || {
+                    let progress = GuiProgressSink { tx: tx.clone() };
+                    let res = app
+                        .remove_items_from_archive(
+                            &archive_path,
+                            &targets_for_worker,
+                            pass.as_deref(),
+                            false,
+                            &progress,
+                        )
+                        .map(|(m, removed_count)| {
+                            (
+                                m,
+                                targets_for_worker,
+                                format!("✔ Removed {removed_count} item(s) from archive."),
+                            )
+                        })
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(WorkerMessage::ItemsRemoved(res));
+                });
+            }
         }
+    }
+
+    fn trigger_change_password(&mut self) {
+        if self.is_busy || self.new_archive_passphrase.is_empty() {
+            return;
+        }
+        self.is_busy = true;
+        self.last_error = None;
+        self.status_line = "Updating archive encryption passphrase...".to_string();
+
+        let app = self.app.clone();
+        let archive_path = PathBuf::from(self.restore_archive_path.trim());
+        let old_pass = if self.restore_passphrase.is_empty() {
+            None
+        } else {
+            Some(self.restore_passphrase.clone())
+        };
+        let new_pass = self.new_archive_passphrase.clone();
+        let tx = self.worker_tx.clone();
+
+        thread::spawn(move || {
+            let progress = GuiProgressSink { tx: tx.clone() };
+            let res = app
+                .change_archive_passphrase(&archive_path, old_pass.as_deref(), &new_pass, &progress)
+                .map(|m| (m, new_pass))
+                .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::PasswordChanged(res));
+        });
+    }
+
+    fn render_change_password_bar(&mut self, ui: &mut Ui) {
+        if !self.show_change_password_panel {
+            return;
+        }
+
+        egui::Frame::none()
+            .fill(Color32::from_rgba_unmultiplied(40, 48, 64, 140))
+            .inner_margin(6.0)
+            .rounding(4.0)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("🔑 Change Archive Password:").strong());
+                    ui.label("Current Passphrase:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.restore_passphrase)
+                            .password(true)
+                            .desired_width(120.0),
+                    );
+                    ui.label("New Passphrase:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_archive_passphrase)
+                            .password(true)
+                            .desired_width(140.0),
+                    );
+                    if ui
+                        .add_enabled(
+                            !self.is_busy && !self.new_archive_passphrase.is_empty(),
+                            egui::Button::new("✔ Apply New Password"),
+                        )
+                        .clicked()
+                    {
+                        self.trigger_change_password();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.show_change_password_panel = false;
+                        self.new_archive_passphrase.clear();
+                    }
+                });
+            });
     }
 
     fn trigger_preview_scan(&mut self) {
@@ -996,7 +1133,15 @@ impl WbakGuiApp {
                     .password(true)
                     .desired_width(140.0),
             );
+            if ui
+                .selectable_label(self.show_change_password_panel, "🔑 Change Password...")
+                .clicked()
+            {
+                self.show_change_password_panel = !self.show_change_password_panel;
+            }
         });
+
+        self.render_change_password_bar(ui);
 
         ui.horizontal(|ui| {
             if ui
@@ -1117,6 +1262,7 @@ impl WbakGuiApp {
             });
 
             let mut jump_to_view_file: Option<String> = None;
+            let mut remove_file_path: Option<String> = None;
             ScrollArea::vertical()
                 .id_salt("restore_inspector_scroll")
                 .max_height(190.0)
@@ -1139,6 +1285,13 @@ impl WbakGuiApp {
                                         .clicked()
                                 {
                                     jump_to_view_file = Some(f.logical_path.clone());
+                                }
+                                if ui
+                                    .add_enabled(!self.is_busy, egui::Button::new("🗑 Remove").small())
+                                    .on_hover_text("Remove this item from the archive")
+                                    .clicked()
+                                {
+                                    remove_file_path = Some(f.logical_path.clone());
                                 }
                                 if f.is_secret() {
                                     ui.colored_label(
@@ -1242,6 +1395,10 @@ impl WbakGuiApp {
                 if let Some(act) = self.viewer_panel.select_and_view(logical_path) {
                     self.execute_viewer_action(act);
                 }
+            } else if let Some(logical_path) = remove_file_path {
+                self.execute_viewer_action(ViewerAction::RemoveItems {
+                    logical_paths: vec![logical_path],
+                });
             }
         }
 
@@ -1369,8 +1526,15 @@ impl WbakGuiApp {
                         let _ = tx.send(WorkerMessage::InspectCompleted(res));
                     });
                 }
+                if ui
+                    .selectable_label(self.show_change_password_panel, "🔑 Change Password...")
+                    .clicked()
+                {
+                    self.show_change_password_panel = !self.show_change_password_panel;
+                }
             });
 
+            self.render_change_password_bar(ui);
             ui.separator();
         }
 

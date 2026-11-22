@@ -65,6 +65,54 @@ impl WbakArchiveWriter {
 
         Ok((header, footer))
     }
+
+    /// Serializes, zstd-compresses, optionally encrypts, and appends the manifest + footer tail.
+    fn write_manifest_tail<W: Write>(
+        &self,
+        writer: &mut W,
+        manifest: &ArchiveManifest,
+        manifest_offset: u64,
+        compression_level: i32,
+        encrypt_manifest: bool,
+        encryption_key: Option<&DerivedKey>,
+    ) -> DomainResult<()> {
+        let manifest_json = serde_json::to_vec(manifest).map_err(|e| {
+            DomainError::StorageError(format!("Failed to serialize archive manifest: {e}"))
+        })?;
+        let compressed_manifest = zstd::encode_all(manifest_json.as_slice(), compression_level)
+            .map_err(|e| {
+                DomainError::StorageError(format!("Failed to compress archive manifest: {e}"))
+            })?;
+
+        let (manifest_bytes, manifest_nonce) = if encrypt_manifest {
+            let key = encryption_key
+                .ok_or_else(|| DomainError::PassphraseRequired("archive manifest".to_string()))?;
+            self.crypto
+                .encrypt(key, &compressed_manifest, b"wbak-manifest-v1")?
+        } else {
+            (compressed_manifest, [0u8; 12])
+        };
+
+        let manifest_stored_size = manifest_bytes.len() as u64;
+        writer
+            .write_all(&manifest_bytes)
+            .map_err(|e| DomainError::StorageError(format!("Failed writing manifest: {e}")))?;
+
+        let footer = ArchiveFooter {
+            manifest_offset,
+            manifest_stored_size,
+            manifest_nonce,
+        };
+        writer
+            .write_all(&footer.to_bytes())
+            .map_err(|e| DomainError::StorageError(format!("Failed writing footer: {e}")))?;
+
+        writer
+            .flush()
+            .map_err(|e| DomainError::StorageError(format!("Failed flushing archive: {e}")))?;
+
+        Ok(())
+    }
 }
 
 impl ArchiveWriterPort for WbakArchiveWriter {
@@ -260,14 +308,15 @@ impl ArchiveWriterPort for WbakArchiveWriter {
                     // Fast path (Strategy 1): If `WbakApplication` pre-populated `chunks` and `content_hash`
                     // from `previous_manifest` (because `size` and `modified_at` were identical) and all
                     // referenced chunks exist in `chunks_map` with sufficient encryption, skip disk read!
-                    let can_reuse_without_disk_read = !chunks.is_empty()
-                        && !content_hash.0.is_empty()
-                        && chunks.iter().all(|cid| {
-                            chunks_map
-                                .get(cid)
-                                .map(|desc| !encrypt_this_file || desc.encrypted)
-                                .unwrap_or(false)
-                        });
+                    let can_reuse_without_disk_read = !content_hash.0.is_empty()
+                        && ((*size == 0 && chunks.is_empty())
+                            || (!chunks.is_empty()
+                                && chunks.iter().all(|cid| {
+                                    chunks_map
+                                        .get(cid)
+                                        .map(|desc| !encrypt_this_file || desc.encrypted)
+                                        .unwrap_or(false)
+                                })));
 
                     if can_reuse_without_disk_read {
                         progress.on_progress(ProgressEvent {
@@ -410,43 +459,14 @@ impl ArchiveWriterPort for WbakArchiveWriter {
             stats,
         };
 
-        let manifest_json = serde_json::to_vec(&manifest).map_err(|e| {
-            DomainError::StorageError(format!("Failed to serialize archive manifest: {e}"))
-        })?;
-        let compressed_manifest =
-            zstd::encode_all(manifest_json.as_slice(), input.compression_level).map_err(|e| {
-                DomainError::StorageError(format!("Failed to compress archive manifest: {e}"))
-            })?;
-
-        let (manifest_bytes, manifest_nonce) = if input.encrypt_full_archive {
-            let key = derived_key
-                .as_ref()
-                .ok_or_else(|| DomainError::PassphraseRequired("archive manifest".to_string()))?;
-            self.crypto
-                .encrypt(key, &compressed_manifest, b"wbak-manifest-v1")?
-        } else {
-            (compressed_manifest, [0u8; 12])
-        };
-
-        let manifest_offset = current_offset;
-        let manifest_stored_size = manifest_bytes.len() as u64;
-
-        writer
-            .write_all(&manifest_bytes)
-            .map_err(|e| DomainError::StorageError(format!("Failed writing manifest: {e}")))?;
-
-        let footer = ArchiveFooter {
-            manifest_offset,
-            manifest_stored_size,
-            manifest_nonce,
-        };
-        writer
-            .write_all(&footer.to_bytes())
-            .map_err(|e| DomainError::StorageError(format!("Failed writing footer: {e}")))?;
-
-        writer
-            .flush()
-            .map_err(|e| DomainError::StorageError(format!("Failed flushing archive: {e}")))?;
+        self.write_manifest_tail(
+            &mut writer,
+            &manifest,
+            current_offset,
+            input.compression_level,
+            input.encrypt_full_archive,
+            derived_key.as_ref(),
+        )?;
 
         Ok(manifest)
     }
@@ -546,48 +566,26 @@ impl ArchiveWriterPort for WbakArchiveWriter {
         manifest.stats.reclaimable_chunks = 0;
         manifest.stats.reclaimable_bytes = 0;
 
-        let manifest_json = serde_json::to_vec(&manifest).map_err(|e| {
-            DomainError::StorageError(format!("Failed serializing compacted manifest: {e}"))
-        })?;
-        let compressed_manifest =
-            zstd::encode_all(manifest_json.as_slice(), manifest.profile.compression_level)
-                .map_err(|e| {
-                    DomainError::StorageError(format!("Failed compressing manifest: {e}"))
-                })?;
-
-        let (manifest_bytes, manifest_nonce) = if header.is_full_encrypted() {
+        let manifest_key = if header.is_full_encrypted() {
             let pass = passphrase.ok_or_else(|| {
                 DomainError::PassphraseRequired(
                     "Full archive is encrypted; passphrase required to re-encrypt compacted manifest"
                         .to_string(),
                 )
             })?;
-            let key = self.crypto.derive_key(pass, &header.kdf_salt)?;
-            self.crypto
-                .encrypt(&key, &compressed_manifest, b"wbak-manifest-v1")?
+            Some(self.crypto.derive_key(pass, &header.kdf_salt)?)
         } else {
-            (compressed_manifest, [0u8; 12])
+            None
         };
 
-        let manifest_offset = current_offset;
-        let manifest_stored_size = manifest_bytes.len() as u64;
-
-        writer
-            .write_all(&manifest_bytes)
-            .map_err(|e| DomainError::StorageError(format!("Failed writing manifest: {e}")))?;
-
-        let footer = ArchiveFooter {
-            manifest_offset,
-            manifest_stored_size,
-            manifest_nonce,
-        };
-        writer
-            .write_all(&footer.to_bytes())
-            .map_err(|e| DomainError::StorageError(format!("Failed writing footer: {e}")))?;
-
-        writer.flush().map_err(|e| {
-            DomainError::StorageError(format!("Failed flushing compacted file: {e}"))
-        })?;
+        self.write_manifest_tail(
+            &mut writer,
+            &manifest,
+            current_offset,
+            manifest.profile.compression_level,
+            header.is_full_encrypted(),
+            manifest_key.as_ref(),
+        )?;
         drop(writer);
         drop(old_file);
 
@@ -600,6 +598,200 @@ impl ArchiveWriterPort for WbakArchiveWriter {
             current: 1,
             total: Some(1),
             message: "Compaction completed".to_string(),
+        });
+
+        Ok(manifest)
+    }
+
+    fn change_passphrase(
+        &self,
+        archive_path: &Path,
+        old_passphrase: Option<&str>,
+        new_passphrase: &str,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest> {
+        if new_passphrase.is_empty() {
+            return Err(DomainError::PassphraseRequired(
+                "New passphrase cannot be empty".to_string(),
+            ));
+        }
+
+        let reader = WbakArchiveReader::new(self.crypto.clone());
+        let mut manifest = reader.read_manifest(archive_path, old_passphrase)?;
+
+        let mut old_file = File::open(archive_path).map_err(|e| {
+            DomainError::StorageError(format!(
+                "Failed to open archive '{}' for re-keying: {e}",
+                archive_path.display()
+            ))
+        })?;
+        let (old_header, _) = Self::read_existing_header_and_footer(&mut old_file)?;
+
+        let mut referenced_ids: BTreeSet<ChunkId> = BTreeSet::new();
+        for node in &manifest.files {
+            if let FileNodeKind::RegularFile { chunks, .. } = &node.kind {
+                for cid in chunks {
+                    referenced_ids.insert(cid.clone());
+                }
+            }
+        }
+
+        let has_encrypted_live_chunks = referenced_ids.iter().any(|cid| {
+            manifest
+                .chunks
+                .get(cid)
+                .map(|d| d.encrypted)
+                .unwrap_or(false)
+        });
+
+        let old_key = if old_header.is_full_encrypted() || has_encrypted_live_chunks {
+            let old_pass = old_passphrase.filter(|p| !p.is_empty()).ok_or_else(|| {
+                DomainError::PassphraseRequired(
+                    "Current passphrase is required to decrypt existing encrypted chunks"
+                        .to_string(),
+                )
+            })?;
+            Some(self.crypto.derive_key(old_pass, &old_header.kdf_salt)?)
+        } else {
+            None
+        };
+
+        let new_salt = self.crypto.generate_salt();
+        let new_key = self.crypto.derive_key(new_passphrase, &new_salt)?;
+
+        let new_full_encrypted = old_header.is_full_encrypted()
+            || (!manifest.full_archive_encrypted && !manifest.has_encrypted_secrets);
+
+        let mut new_flags = 0u16;
+        if new_full_encrypted {
+            new_flags |= FLAG_FULL_ARCHIVE_ENCRYPTED;
+        }
+        if manifest.has_encrypted_secrets {
+            new_flags |= FLAG_HAS_ENCRYPTED_SECRETS;
+        }
+        let new_header = ArchiveHeader {
+            version: FORMAT_VERSION,
+            flags: new_flags,
+            kdf_salt: new_salt,
+        };
+
+        let temp_path = archive_path.with_extension("wbak.rekey.tmp");
+        let new_file = File::create(&temp_path).map_err(|e| {
+            DomainError::StorageError(format!(
+                "Failed creating temporary re-keyed file '{}': {e}",
+                temp_path.display()
+            ))
+        })?;
+        let mut writer = BufWriter::new(new_file);
+
+        writer
+            .write_all(&new_header.to_bytes())
+            .map_err(|e| DomainError::StorageError(format!("Failed writing header: {e}")))?;
+
+        let mut current_offset = HEADER_SIZE as u64;
+        let mut new_chunks_map = BTreeMap::new();
+        let mut deduplicated_plaintext = 0u64;
+        let mut compressed_stored = 0u64;
+
+        let total_live = referenced_ids.len() as u64;
+        for (idx, cid) in referenced_ids.iter().enumerate() {
+            let Some(old_desc) = manifest.chunks.get(cid) else {
+                return Err(DomainError::StorageError(format!(
+                    "Missing referenced chunk {cid} during passphrase change"
+                )));
+            };
+
+            progress.on_progress(ProgressEvent {
+                phase: ProgressPhase::PackingChunks,
+                current: idx as u64 + 1,
+                total: Some(total_live),
+                message: format!("Re-keying chunk {cid}"),
+            });
+
+            old_file
+                .seek(SeekFrom::Start(old_desc.offset))
+                .map_err(|e| DomainError::StorageError(format!("Seek old chunk failed: {e}")))?;
+
+            let mut raw_payload = vec![0u8; old_desc.stored_size as usize];
+            old_file
+                .read_exact(&mut raw_payload)
+                .map_err(|e| DomainError::StorageError(format!("Read old chunk failed: {e}")))?;
+
+            let compressed_bytes = if old_desc.encrypted {
+                let key = old_key.as_ref().ok_or_else(|| {
+                    DomainError::PassphraseRequired(format!(
+                        "Current passphrase required for encrypted chunk {cid}"
+                    ))
+                })?;
+                let nonce = old_desc.nonce.as_ref().ok_or_else(|| {
+                    DomainError::StorageError(format!(
+                        "Encrypted chunk {cid} is missing its 12-byte nonce"
+                    ))
+                })?;
+                self.crypto
+                    .decrypt(key, nonce, &raw_payload, cid.as_str().as_bytes())?
+            } else {
+                raw_payload
+            };
+
+            let encrypt_chunk = new_full_encrypted || old_desc.encrypted;
+            let (payload_to_write, new_nonce) = if encrypt_chunk {
+                let (ciphertext, nonce) =
+                    self.crypto
+                        .encrypt(&new_key, &compressed_bytes, cid.as_str().as_bytes())?;
+                (ciphertext, Some(nonce))
+            } else {
+                (compressed_bytes, None)
+            };
+
+            writer.write_all(&payload_to_write).map_err(|e| {
+                DomainError::StorageError(format!("Write re-keyed chunk failed: {e}"))
+            })?;
+
+            let stored_size = payload_to_write.len() as u64;
+            let new_desc = ChunkDescriptor {
+                id: cid.clone(),
+                offset: current_offset,
+                stored_size,
+                original_size: old_desc.original_size,
+                encrypted: encrypt_chunk,
+                nonce: new_nonce,
+            };
+
+            current_offset += stored_size;
+            deduplicated_plaintext += old_desc.original_size;
+            compressed_stored += stored_size;
+            new_chunks_map.insert(cid.clone(), new_desc);
+        }
+
+        manifest.full_archive_encrypted = new_full_encrypted;
+        manifest.chunks = new_chunks_map;
+        manifest.stats.unique_chunks = manifest.chunks.len();
+        manifest.stats.deduplicated_plaintext_bytes = deduplicated_plaintext;
+        manifest.stats.compressed_stored_bytes = compressed_stored;
+        manifest.stats.reclaimable_chunks = 0;
+        manifest.stats.reclaimable_bytes = 0;
+
+        self.write_manifest_tail(
+            &mut writer,
+            &manifest,
+            current_offset,
+            manifest.profile.compression_level,
+            new_full_encrypted,
+            Some(&new_key),
+        )?;
+        drop(writer);
+        drop(old_file);
+
+        std::fs::rename(&temp_path, archive_path).map_err(|e| {
+            DomainError::StorageError(format!("Failed replacing archive with re-keyed file: {e}"))
+        })?;
+
+        progress.on_progress(ProgressEvent {
+            phase: ProgressPhase::Completed,
+            current: 1,
+            total: Some(1),
+            message: "Archive passphrase updated successfully".to_string(),
         });
 
         Ok(manifest)

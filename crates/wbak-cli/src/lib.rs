@@ -503,6 +503,96 @@ pub fn run_cli_command(app: &WbakApplication, cli: Cli) -> Result<()> {
                 }
             }
         }
+
+        Commands::Remove {
+            archive,
+            paths,
+            password,
+            compact,
+        } => {
+            let progress = CliProgressSink::new();
+            let prompter = CliSecretPrompter;
+
+            let (manifest, removed_count) = match app.remove_items_from_archive(
+                &archive,
+                &paths,
+                password.as_deref(),
+                compact,
+                &progress,
+            ) {
+                Ok(res) => res,
+                Err(wbak_domain::DomainError::PassphraseRequired(reason)) => {
+                    progress.finish();
+                    let pass = prompter.prompt_passphrase(&reason, false)?;
+                    app.remove_items_from_archive(
+                        &archive,
+                        &paths,
+                        Some(&pass),
+                        compact,
+                        &progress,
+                    )?
+                }
+                Err(e) => return Err(e.into()),
+            };
+            progress.finish();
+
+            println!(
+                "{} Removed {} item(s) from {} ({} files remaining, {} live chunks)",
+                style("✔").green().bold(),
+                style(removed_count).cyan(),
+                style(archive.display()).cyan().bold(),
+                manifest.stats.total_files,
+                manifest.stats.unique_chunks
+            );
+            if manifest.stats.reclaimable_chunks > 0 {
+                println!(
+                    "  Reclaimable : {} dead chunks ({} B — run `wbak compact {}` to reclaim)",
+                    style(manifest.stats.reclaimable_chunks).yellow(),
+                    manifest.stats.reclaimable_bytes,
+                    archive.display()
+                );
+            }
+        }
+
+        Commands::Passwd {
+            archive,
+            old_password,
+            new_password,
+        } => {
+            let progress = CliProgressSink::new();
+            let prompter = CliSecretPrompter;
+
+            let new_pass = match new_password {
+                Some(p) => p,
+                None => prompter.prompt_passphrase("Enter new passphrase for archive", true)?,
+            };
+
+            let manifest = match app.change_archive_passphrase(
+                &archive,
+                old_password.as_deref(),
+                &new_pass,
+                &progress,
+            ) {
+                Ok(m) => m,
+                Err(wbak_domain::DomainError::PassphraseRequired(reason))
+                    if old_password.is_none() =>
+                {
+                    progress.finish();
+                    let old_pass = prompter.prompt_passphrase(&reason, false)?;
+                    app.change_archive_passphrase(&archive, Some(&old_pass), &new_pass, &progress)?
+                }
+                Err(e) => return Err(e.into()),
+            };
+            progress.finish();
+
+            println!(
+                "{} Updated encryption passphrase for {} ({} chunks re-keyed, full_encrypted={})",
+                style("✔").green().bold(),
+                style(archive.display()).cyan().bold(),
+                manifest.stats.unique_chunks,
+                manifest.full_archive_encrypted
+            );
+        }
     }
 
     Ok(())

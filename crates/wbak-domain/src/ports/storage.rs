@@ -40,6 +40,17 @@ pub trait ArchiveWriterPort: Send + Sync {
         passphrase: Option<&str>,
         progress: &dyn ProgressSinkPort,
     ) -> DomainResult<ArchiveManifest>;
+
+    /// Re-keys an existing `.wbak` archive with `new_passphrase` (generating a new Argon2id salt
+    /// and fresh ChaCha20-Poly1305 nonces for all encrypted chunks and manifest without
+    /// decompressing or re-compressing zstd payloads).
+    fn change_passphrase(
+        &self,
+        archive_path: &Path,
+        old_passphrase: Option<&str>,
+        new_passphrase: &str,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest>;
 }
 
 /// Port for random-access reading, verification, and chunk extraction from `.wbak` archives.

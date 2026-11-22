@@ -331,6 +331,117 @@ fn end_to_end_backup_ignore_bang_exemption_ssh_encryption_diff_and_restore() {
         Some(fake_png_bytes.as_slice())
     );
 
+    // 10. Rotate/change the archive passphrase from "enterprise-pass-999" to "new-rotated-pass-2026"
+    let rekeyed_manifest = app
+        .change_archive_passphrase(
+            &archive_path,
+            Some("enterprise-pass-999"),
+            "new-rotated-pass-2026",
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    // Old passphrase must no longer decrypt encrypted files; new passphrase must succeed!
+    assert!(
+        app.read_archive_file_bytes(
+            &archive_path,
+            &rekeyed_manifest,
+            expected_logical,
+            Some("enterprise-pass-999"),
+        )
+        .is_err()
+    );
+    let (_, rotated_read) = app
+        .read_archive_file_bytes(
+            &archive_path,
+            &rekeyed_manifest,
+            expected_logical,
+            Some("new-rotated-pass-2026"),
+        )
+        .unwrap();
+    assert_eq!(rotated_read, fake_png_bytes);
+
+    // Also test changing password on a fully-encrypted archive
+    let full_enc_archive = temp.path().join("full-enc.wbak");
+    let full_enc_profile = ProfileConfig {
+        profile: ProfileMetadata {
+            name: "full-enc-test".to_string(),
+            description: "Full archive encryption password rotation test".to_string(),
+            compression_level: 3,
+        },
+        security: SecurityPolicy {
+            encrypt_full_archive: true,
+            encrypt_sensitive_by_default: true,
+            sensitive_patterns: default_sensitive_patterns(),
+        },
+        files: FileBackupConfig {
+            include: vec!["${USERPROFILE}/dev/app".to_string()],
+            ignore_file: None,
+            ignore_patterns: vec!["**/node_modules/".to_string()],
+            respect_local_ignore_files: false,
+        },
+        registry: RegistryBackupConfig::default(),
+        environment: EnvironmentBackupConfig::default(),
+    };
+    let _ = app
+        .create_backup(
+            CreateBackupRequest {
+                profile: full_enc_profile,
+                output_archive: full_enc_archive.clone(),
+                passphrase: Some("enterprise-pass-999".to_string()),
+                allow_unencrypted_secrets: false,
+                force_full_rebuild: true,
+                keep_deleted: false,
+                compact_after_update: false,
+            },
+            &NoopProgressSink,
+            None,
+        )
+        .unwrap();
+
+    let rotated_full_manifest = app
+        .change_archive_passphrase(
+            &full_enc_archive,
+            Some("enterprise-pass-999"),
+            "new-rotated-pass-2026",
+            &NoopProgressSink,
+        )
+        .unwrap();
+    assert!(rotated_full_manifest.full_archive_encrypted);
+    // Old password cannot read manifest; new password can!
+    assert!(
+        app.inspect_archive(&full_enc_archive, Some("enterprise-pass-999"))
+            .is_err()
+    );
+    let inspected_new = app
+        .inspect_archive(&full_enc_archive, Some("new-rotated-pass-2026"))
+        .unwrap();
+    assert!(inspected_new.full_archive_encrypted);
+
+    // 11. Remove an entire directory from the archive and verify it is no longer present
+    let (after_remove_manifest, removed_count) = app
+        .remove_items_from_archive(
+            &archive_path,
+            &["${USERPROFILE}/Files/MyImages".to_string()],
+            Some("new-rotated-pass-2026"),
+            true,
+            &NoopProgressSink,
+        )
+        .unwrap();
+    assert!(removed_count >= 2); // MyImages directory node + dropped-photo.png
+    assert!(
+        !after_remove_manifest
+            .files
+            .iter()
+            .any(|f| f.logical_path.contains("MyImages"))
+    );
+    app.verify_archive(
+        &archive_path,
+        Some("new-rotated-pass-2026"),
+        &NoopProgressSink,
+    )
+    .unwrap();
+
     // Clean up test registry key
     let _ = hkcu.delete_subkey_all(reg_subkey);
 }

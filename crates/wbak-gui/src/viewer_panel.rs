@@ -56,6 +56,9 @@ pub enum ViewerAction {
         paths: Vec<std::path::PathBuf>,
         encrypt_added: bool,
     },
+    RemoveItems {
+        logical_paths: Vec<String>,
+    },
 }
 
 pub struct ContentViewerPanel {
@@ -72,6 +75,7 @@ pub struct ContentViewerPanel {
     active_media_kind: MediaKind,
     override_mode: InspectorOverrideMode,
     loaded_asset: Option<LoadedViewerAsset>,
+    video_fullscreen: bool,
 
     // Text viewer options
     text_search_query: String,
@@ -97,6 +101,7 @@ impl ContentViewerPanel {
             active_media_kind: MediaKind::Binary,
             override_mode: InspectorOverrideMode::Auto,
             loaded_asset: None,
+            video_fullscreen: false,
             text_search_query: String::new(),
             text_show_line_numbers: true,
             text_word_wrap: false,
@@ -120,6 +125,7 @@ impl ContentViewerPanel {
         self.memory_cache.clear();
         self.loaded_asset = None;
         self.active_asset_path = None;
+        self.video_fullscreen = false;
     }
 
     pub fn total_cached_bytes(&self) -> usize {
@@ -142,6 +148,7 @@ impl ContentViewerPanel {
         self.active_asset_path = None;
         self.loaded_asset = None;
         self.override_mode = InspectorOverrideMode::Auto;
+        self.video_fullscreen = false;
 
         if self.memory_cache.contains_key(&logical_path) {
             None
@@ -151,12 +158,12 @@ impl ContentViewerPanel {
     }
 
     pub fn is_video_mode_active(&self) -> bool {
+        if !self.video_fullscreen || self.override_mode != InspectorOverrideMode::Auto {
+            return false;
+        }
         let Some(ref selected) = self.selected_file else {
             return false;
         };
-        if self.override_mode != InspectorOverrideMode::Auto {
-            return false;
-        }
         let bytes = self
             .memory_cache
             .get(selected)
@@ -170,6 +177,28 @@ impl ContentViewerPanel {
         self.active_asset_path = None;
         self.loaded_asset = None;
         self.override_mode = InspectorOverrideMode::Auto;
+        self.video_fullscreen = false;
+    }
+
+    pub fn prune_removed_paths(&mut self, removed_targets: &[String]) {
+        self.memory_cache
+            .retain(|k, _| !matches_removed_target(k, removed_targets));
+
+        if let Some(ref sel) = self.selected_file
+            && matches_removed_target(sel, removed_targets)
+        {
+            self.exit_selected_file();
+        }
+
+        while !self.current_dir.is_empty()
+            && matches_removed_target(&self.current_dir, removed_targets)
+        {
+            if let Some((parent, _)) = self.current_dir.rsplit_once('/') {
+                self.current_dir = parent.to_string();
+            } else {
+                self.current_dir.clear();
+            }
+        }
     }
 
     fn prepare_active_asset(&mut self, ctx: &egui::Context, logical_path: &str, bytes: &Arc<[u8]>) {
@@ -351,7 +380,13 @@ impl ContentViewerPanel {
         let available_height = (ui.available_height() - 12.0).max(280.0);
         ui.columns(2, |cols| {
             cols[0].set_min_height(available_height);
-            self.render_directory_entries(&mut cols[0], manifest, available_height, &mut action);
+            self.render_directory_entries(
+                &mut cols[0],
+                manifest,
+                available_height,
+                is_busy,
+                &mut action,
+            );
 
             cols[1].set_min_height(available_height);
             self.render_active_viewer_pane(
@@ -359,6 +394,7 @@ impl ContentViewerPanel {
                 &mut cols[1],
                 manifest,
                 available_height,
+                is_busy,
                 &mut action,
             );
         });
@@ -492,6 +528,7 @@ impl ContentViewerPanel {
         ui: &mut Ui,
         manifest: &ArchiveManifest,
         max_height: f32,
+        is_busy: bool,
         action: &mut Option<ViewerAction>,
     ) {
         let prefix = if self.current_dir.is_empty() {
@@ -569,7 +606,16 @@ impl ContentViewerPanel {
                             )
                             .clicked()
                         {
-                            enter_dir = Some(full_sub);
+                            enter_dir = Some(full_sub.clone());
+                        }
+                        if ui
+                            .add_enabled(!is_busy, egui::Button::new("🗑").small())
+                            .on_hover_text("Remove folder and its contents from archive")
+                            .clicked()
+                        {
+                            *action = Some(ViewerAction::RemoveItems {
+                                logical_paths: vec![full_sub],
+                            });
                         }
                     });
                 }
@@ -599,6 +645,7 @@ impl ContentViewerPanel {
                             self.selected_file = Some(file_node.logical_path.clone());
                             self.active_asset_path = None;
                             self.loaded_asset = None;
+                            self.video_fullscreen = false;
                             if !in_ram {
                                 *action = Some(ViewerAction::LoadFileIntoMemory {
                                     logical_path: file_node.logical_path.clone(),
@@ -616,6 +663,15 @@ impl ContentViewerPanel {
                                 RichText::new("[RAM]").small(),
                             );
                         }
+                        if ui
+                            .add_enabled(!is_busy, egui::Button::new("🗑").small())
+                            .on_hover_text("Remove file from archive")
+                            .clicked()
+                        {
+                            *action = Some(ViewerAction::RemoveItems {
+                                logical_paths: vec![file_node.logical_path.clone()],
+                            });
+                        }
                     });
                 }
             });
@@ -627,6 +683,7 @@ impl ContentViewerPanel {
         ui: &mut Ui,
         manifest: &ArchiveManifest,
         max_height: f32,
+        is_busy: bool,
         action: &mut Option<ViewerAction>,
     ) {
         let Some(selected_path) = self.selected_file.clone() else {
@@ -698,6 +755,16 @@ impl ContentViewerPanel {
                 {
                     let _ = std::fs::write(save_path, bytes.as_ref());
                 }
+            }
+
+            if ui
+                .add_enabled(!is_busy, egui::Button::new("🗑 Remove from Archive").small())
+                .on_hover_text("Remove this file from the .wbak archive")
+                .clicked()
+            {
+                *action = Some(ViewerAction::RemoveItems {
+                    logical_paths: vec![selected_path.clone()],
+                });
             }
 
             ui.separator();
@@ -940,7 +1007,21 @@ impl ContentViewerPanel {
                         });
                     });
                 }
-                LoadedViewerAsset::Video { .. } => {}
+                LoadedViewerAsset::Video { session, texture } => {
+                    let canvas_height = (body_height - 64.0).max(120.0);
+                    render_video_player_ui(
+                        ctx,
+                        ui,
+                        &selected_path,
+                        session,
+                        texture,
+                        canvas_height,
+                        false,
+                        &mut self.fit_to_window,
+                        &mut self.zoom_factor,
+                        &mut self.video_fullscreen,
+                    );
+                }
                 LoadedViewerAsset::UnsupportedMedia { error } => {
                     ui.colored_label(
                         Color32::from_rgb(245, 165, 85),
@@ -970,7 +1051,7 @@ impl ContentViewerPanel {
         };
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.exit_selected_file();
+            self.video_fullscreen = false;
             return;
         }
 
@@ -989,7 +1070,7 @@ impl ContentViewerPanel {
         let Some(bytes) = self.memory_cache.get(&selected_path).cloned() else {
             ui.horizontal(|ui| {
                 if ui.button("⬅ Back").clicked() {
-                    self.exit_selected_file();
+                    self.video_fullscreen = false;
                     return;
                 }
                 ui.label(RichText::new(format!("🎬 {short_name}")).strong());
@@ -1013,15 +1094,17 @@ impl ContentViewerPanel {
         self.prepare_active_asset(ctx, &selected_path, &bytes);
 
         // Top compact header bar with little Back button to exit fullscreen video mode
-        let mut should_exit = false;
+        let mut should_exit_fullscreen = false;
         ui.horizontal(|ui| {
             let back_btn = egui::Button::new(RichText::new("⬅ Back").strong());
             if ui
                 .add(back_btn)
-                .on_hover_text("Exit video player and return to folder browser (Esc)")
+                .on_hover_text(
+                    "Exit fullscreen video player and return to side-by-side viewer (Esc)",
+                )
                 .clicked()
             {
-                should_exit = true;
+                should_exit_fullscreen = true;
             }
 
             ui.separator();
@@ -1039,11 +1122,12 @@ impl ContentViewerPanel {
             }
             if ui.small_button("🔢 View Hex").clicked() {
                 self.override_mode = InspectorOverrideMode::Hex;
+                self.video_fullscreen = false;
             }
         });
 
-        if should_exit {
-            self.exit_selected_file();
+        if should_exit_fullscreen {
+            self.video_fullscreen = false;
             return;
         }
 
@@ -1053,173 +1137,20 @@ impl ContentViewerPanel {
         if let Some(asset) = &mut self.loaded_asset {
             match asset {
                 LoadedViewerAsset::Video { session, texture } => {
-                    if let Some(frame) = session.poll_frame() {
-                        let img = ColorImage::from_rgba_unmultiplied(
-                            [frame.width as usize, frame.height as usize],
-                            &frame.rgba,
-                        );
-                        match texture {
-                            Some(tex) => tex.set(img, TextureOptions::LINEAR),
-                            None => {
-                                *texture = Some(ctx.load_texture(
-                                    format!("wbak_video_{selected_path}"),
-                                    img,
-                                    TextureOptions::LINEAR,
-                                ));
-                            }
-                        }
-                    }
-
-                    let status = session.status();
-                    if status.is_playing {
-                        ctx.request_repaint_after(Duration::from_millis(16));
-                    }
-
-                    // Reserve bottom 60px for the transport bar + full-screen-width seek bar
                     let bottom_bar_height = 60.0;
                     let canvas_height = (ui.available_height() - bottom_bar_height).max(120.0);
-                    let canvas_size = Vec2::new(ui.available_width(), canvas_height);
-
-                    let (canvas_rect, canvas_response) =
-                        ui.allocate_exact_size(canvas_size, Sense::click());
-                    let painter = ui.painter_at(canvas_rect);
-                    painter.rect_filled(canvas_rect, 4.0, Color32::from_rgb(10, 12, 16));
-
-                    if let Some(tex) = texture {
-                        let native = tex.size_vec2();
-                        let draw_size = if native.x > 0.0 && native.y > 0.0 {
-                            if self.fit_to_window {
-                                let scale = (canvas_rect.width() / native.x)
-                                    .min(canvas_rect.height() / native.y);
-                                native * scale
-                            } else {
-                                native * self.zoom_factor
-                            }
-                        } else {
-                            canvas_rect.size()
-                        };
-
-                        let video_rect = Rect::from_center_size(canvas_rect.center(), draw_size);
-                        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-                        painter.image(tex.id(), video_rect, uv, Color32::WHITE);
-                    } else {
-                        painter.text(
-                            canvas_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "Decoding video stream in memory...",
-                            egui::FontId::proportional(16.0),
-                            Color32::from_rgb(180, 190, 210),
-                        );
-                    }
-
-                    if !status.is_playing {
-                        let badge_rect =
-                            Rect::from_center_size(canvas_rect.center(), Vec2::new(150.0, 42.0));
-                        painter.rect_filled(
-                            badge_rect,
-                            8.0,
-                            Color32::from_rgba_unmultiplied(15, 18, 24, 195),
-                        );
-                        painter.text(
-                            badge_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "⏸ Paused",
-                            egui::FontId::proportional(18.0),
-                            Color32::WHITE,
-                        );
-                    }
-
-                    // Clicking anywhere on the viewable video area pauses/resumes the video
-                    if canvas_response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                    {
-                        if status.is_playing {
-                            session.pause();
-                        } else {
-                            session.play();
-                        }
-                        ctx.request_repaint();
-                    }
-
-                    ui.add_space(4.0);
-
-                    // Transport controls row right above the full-width bottom seek bar
-                    ui.horizontal_wrapped(|ui| {
-                        if status.is_playing {
-                            if ui.button("⏸ Pause").clicked() {
-                                session.pause();
-                            }
-                        } else if ui.button("▶ Play").clicked() {
-                            session.play();
-                        }
-                        if ui.button("⏮ Restart").clicked() {
-                            session.restart();
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-                        if ui.button("⏪ -10s").clicked() {
-                            session.seek_ms(status.position_ms.saturating_sub(10_000));
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-                        if ui.button("⏪ -5s").clicked() {
-                            session.seek_ms(status.position_ms.saturating_sub(5_000));
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-                        if ui.button("⏩ +5s").clicked() {
-                            session.seek_ms(status.position_ms.saturating_add(5_000));
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-                        if ui.button("⏩ +10s").clicked() {
-                            session.seek_ms(status.position_ms.saturating_add(10_000));
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-
-                        ui.separator();
-                        ui.weak(format!("{}×{}", status.width, status.height));
-                        ui.checkbox(&mut self.fit_to_window, "Fit");
-
-                        let mut muted = status.muted;
-                        if ui.checkbox(&mut muted, "🔇").changed() {
-                            session.set_muted(muted);
-                        }
-                        let mut vol = status.volume;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut vol, 0.0..=1.5)
-                                    .show_value(false)
-                                    .text("🔊"),
-                            )
-                            .changed()
-                        {
-                            session.set_volume(vol);
-                        }
-                    });
-
-                    // Full-screen-width seek bar pinned at the very bottom
-                    let max_vid_ms = status
-                        .duration_ms
-                        .unwrap_or(status.position_ms.saturating_add(30_000).max(60_000))
-                        .max(1);
-                    let mut vid_seek_secs = status.position_ms as f64 / 1000.0;
-                    let max_vid_secs = max_vid_ms as f64 / 1000.0;
-                    let dur_str = status
-                        .duration_ms
-                        .map(format_duration_ms)
-                        .unwrap_or_else(|| "--:--".to_string());
-
-                    ui.horizontal(|ui| {
-                        ui.monospace(format_duration_ms(status.position_ms));
-                        let slider_w = (ui.available_width() - 56.0).max(120.0);
-                        ui.spacing_mut().slider_width = slider_w;
-                        let slider = egui::Slider::new(&mut vid_seek_secs, 0.0..=max_vid_secs)
-                            .show_value(false)
-                            .trailing_fill(true);
-                        if ui.add_sized([slider_w, 20.0], slider).changed() {
-                            session.seek_ms((vid_seek_secs * 1000.0) as u64);
-                            ctx.request_repaint_after(Duration::from_millis(16));
-                        }
-                        ui.monospace(&dur_str);
-                    });
+                    render_video_player_ui(
+                        ctx,
+                        ui,
+                        &selected_path,
+                        session,
+                        texture,
+                        canvas_height,
+                        true,
+                        &mut self.fit_to_window,
+                        &mut self.zoom_factor,
+                        &mut self.video_fullscreen,
+                    );
                 }
                 LoadedViewerAsset::UnsupportedMedia { error } => {
                     fallback_error = Some(error.clone());
@@ -1340,6 +1271,204 @@ impl Default for ContentViewerPanel {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[allow(clippy::too_many_arguments, clippy::borrowed_box)]
+fn render_video_player_ui(
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    selected_path: &str,
+    session: &mut Box<dyn VideoSession>,
+    texture: &mut Option<TextureHandle>,
+    canvas_height: f32,
+    is_fullscreen: bool,
+    fit_to_window: &mut bool,
+    zoom_factor: &mut f32,
+    video_fullscreen: &mut bool,
+) {
+    if let Some(frame) = session.poll_frame() {
+        let img = ColorImage::from_rgba_unmultiplied(
+            [frame.width as usize, frame.height as usize],
+            &frame.rgba,
+        );
+        match texture {
+            Some(tex) => tex.set(img, TextureOptions::LINEAR),
+            None => {
+                *texture = Some(ctx.load_texture(
+                    format!("wbak_video_{selected_path}"),
+                    img,
+                    TextureOptions::LINEAR,
+                ));
+            }
+        }
+    }
+
+    let status = session.status();
+    if status.is_playing {
+        ctx.request_repaint_after(Duration::from_millis(16));
+    }
+
+    let canvas_size = Vec2::new(ui.available_width(), canvas_height);
+    let (canvas_rect, canvas_response) = ui.allocate_exact_size(canvas_size, Sense::click());
+    let painter = ui.painter_at(canvas_rect);
+    painter.rect_filled(canvas_rect, 4.0, Color32::from_rgb(10, 12, 16));
+
+    if let Some(tex) = texture {
+        let native = tex.size_vec2();
+        let draw_size = if native.x > 0.0 && native.y > 0.0 {
+            if *fit_to_window {
+                let scale = (canvas_rect.width() / native.x).min(canvas_rect.height() / native.y);
+                native * scale
+            } else {
+                native * *zoom_factor
+            }
+        } else {
+            canvas_rect.size()
+        };
+
+        let video_rect = Rect::from_center_size(canvas_rect.center(), draw_size);
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        painter.image(tex.id(), video_rect, uv, Color32::WHITE);
+    } else {
+        painter.text(
+            canvas_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Decoding video stream in memory...",
+            egui::FontId::proportional(16.0),
+            Color32::from_rgb(180, 190, 210),
+        );
+    }
+
+    if !status.is_playing {
+        let badge_rect = Rect::from_center_size(canvas_rect.center(), Vec2::new(150.0, 42.0));
+        painter.rect_filled(
+            badge_rect,
+            8.0,
+            Color32::from_rgba_unmultiplied(15, 18, 24, 195),
+        );
+        painter.text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "⏸ Paused",
+            egui::FontId::proportional(18.0),
+            Color32::WHITE,
+        );
+    }
+
+    // Clicking anywhere on the viewable video area pauses/resumes the video
+    if canvas_response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        if status.is_playing {
+            session.pause();
+        } else {
+            session.play();
+        }
+        ctx.request_repaint();
+    }
+
+    ui.add_space(4.0);
+
+    // Transport controls row right above the bottom seek bar
+    ui.horizontal_wrapped(|ui| {
+        if status.is_playing {
+            if ui.button("⏸ Pause").clicked() {
+                session.pause();
+            }
+        } else if ui.button("▶ Play").clicked() {
+            session.play();
+        }
+        if ui.button("⏮ Restart").clicked() {
+            session.restart();
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if ui.button("⏪ -10s").clicked() {
+            session.seek_ms(status.position_ms.saturating_sub(10_000));
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if ui.button("⏪ -5s").clicked() {
+            session.seek_ms(status.position_ms.saturating_sub(5_000));
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if ui.button("⏩ +5s").clicked() {
+            session.seek_ms(status.position_ms.saturating_add(5_000));
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        if ui.button("⏩ +10s").clicked() {
+            session.seek_ms(status.position_ms.saturating_add(10_000));
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+
+        ui.separator();
+        ui.weak(format!("{}×{}", status.width, status.height));
+        ui.checkbox(fit_to_window, "Fit");
+
+        let mut muted = status.muted;
+        if ui.checkbox(&mut muted, "🔇").changed() {
+            session.set_muted(muted);
+        }
+        let mut vol = status.volume;
+        if ui
+            .add(
+                egui::Slider::new(&mut vol, 0.0..=1.5)
+                    .show_value(false)
+                    .text("🔊"),
+            )
+            .changed()
+        {
+            session.set_volume(vol);
+        }
+
+        ui.separator();
+        if is_fullscreen {
+            if ui.button("🗗 Exit Fullscreen").clicked() {
+                *video_fullscreen = false;
+            }
+        } else if ui.button("⛶ Fullscreen").clicked() {
+            *video_fullscreen = true;
+        }
+    });
+
+    // Seek bar spanning full width of the video area
+    let max_vid_ms = status
+        .duration_ms
+        .unwrap_or(status.position_ms.saturating_add(30_000).max(60_000))
+        .max(1);
+    let mut vid_seek_secs = status.position_ms as f64 / 1000.0;
+    let max_vid_secs = max_vid_ms as f64 / 1000.0;
+    let dur_str = status
+        .duration_ms
+        .map(format_duration_ms)
+        .unwrap_or_else(|| "--:--".to_string());
+
+    ui.horizontal(|ui| {
+        ui.monospace(format_duration_ms(status.position_ms));
+        let slider_w = (ui.available_width() - 56.0).max(120.0);
+        ui.spacing_mut().slider_width = slider_w;
+        let slider = egui::Slider::new(&mut vid_seek_secs, 0.0..=max_vid_secs)
+            .show_value(false)
+            .trailing_fill(true);
+        if ui.add_sized([slider_w, 20.0], slider).changed() {
+            session.seek_ms((vid_seek_secs * 1000.0) as u64);
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        ui.monospace(&dur_str);
+    });
+}
+
+fn matches_removed_target(path: &str, removed_targets: &[String]) -> bool {
+    let norm = path
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_ascii_lowercase();
+    removed_targets.iter().any(|target| {
+        let t = target
+            .replace('\\', "/")
+            .trim_matches('/')
+            .to_ascii_lowercase();
+        !t.is_empty() && (norm == t || norm.starts_with(&format!("{t}/")))
+    })
 }
 
 fn format_bytes(bytes: u64) -> String {

@@ -203,6 +203,40 @@ pub enum Commands {
         #[arg(short = 'x', long = "exclude")]
         exclude_patterns: Vec<String>,
     },
+
+    /// Remove one or more files or directories from an existing `.wbak` archive
+    #[command(visible_aliases = ["rm", "delete", "del"])]
+    Remove {
+        /// Path to the `.wbak` archive
+        archive: PathBuf,
+
+        /// Logical paths or directory names inside the archive to remove
+        #[arg(required = true)]
+        paths: Vec<String>,
+
+        /// Passphrase if the archive is encrypted
+        #[arg(long)]
+        password: Option<String>,
+
+        /// Compact the archive immediately to reclaim space from removed items
+        #[arg(long)]
+        compact: bool,
+    },
+
+    /// Change or set the encryption passphrase on an existing `.wbak` archive
+    #[command(visible_aliases = ["password", "change-password", "rekey"])]
+    Passwd {
+        /// Path to the `.wbak` archive
+        archive: PathBuf,
+
+        /// Current passphrase (prompted interactively if needed and not provided)
+        #[arg(long)]
+        old_password: Option<String>,
+
+        /// New passphrase (prompted interactively with confirmation if not provided)
+        #[arg(long)]
+        new_password: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

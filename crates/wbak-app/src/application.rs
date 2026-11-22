@@ -566,6 +566,112 @@ impl WbakApplication {
         Ok((updated_manifest, new_memory_files))
     }
 
+    /// Re-keys an existing `.wbak` archive with a new encryption passphrase without
+    /// decompressing or re-compressing its data chunks.
+    pub fn change_archive_passphrase(
+        &self,
+        archive_path: &Path,
+        old_passphrase: Option<&str>,
+        new_passphrase: &str,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<ArchiveManifest> {
+        self.archive_writer.change_passphrase(
+            archive_path,
+            old_passphrase,
+            new_passphrase,
+            progress,
+        )
+    }
+
+    /// Removes one or more files or directories (including all descendants of removed directories)
+    /// from an existing `.wbak` archive, optionally compacting dead chunks immediately.
+    pub fn remove_items_from_archive(
+        &self,
+        archive_path: &Path,
+        target_logical_paths: &[String],
+        passphrase: Option<&str>,
+        compact: bool,
+        progress: &dyn ProgressSinkPort,
+    ) -> DomainResult<(ArchiveManifest, usize)> {
+        let existing_manifest = self
+            .archive_reader
+            .read_manifest(archive_path, passphrase)?;
+
+        let clean_targets: Vec<String> = target_logical_paths
+            .iter()
+            .map(|t| t.replace('\\', "/").trim_matches('/').to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        let target_matched_exact_or_prefix: Vec<bool> = clean_targets
+            .iter()
+            .map(|t| {
+                let t_lower = t.to_ascii_lowercase();
+                let t_prefix = format!("{t_lower}/");
+                existing_manifest.files.iter().any(|node| {
+                    let norm = node.logical_path.trim_matches('/').to_ascii_lowercase();
+                    norm == t_lower || norm.starts_with(&t_prefix)
+                })
+            })
+            .collect();
+
+        let original_len = existing_manifest.files.len();
+        let remaining_files: Vec<FileNode> = existing_manifest
+            .files
+            .iter()
+            .filter(|node| {
+                let node_lower = node.logical_path.trim_matches('/').to_ascii_lowercase();
+                let should_remove = clean_targets.iter().enumerate().any(|(idx, t)| {
+                    let t_lower = t.to_ascii_lowercase();
+                    let t_prefix = format!("{t_lower}/");
+                    if node_lower == t_lower || node_lower.starts_with(&t_prefix) {
+                        return true;
+                    }
+                    if !target_matched_exact_or_prefix[idx] {
+                        let suffix = format!("/{t_lower}");
+                        let segment = format!("/{t_lower}/");
+                        return node_lower.ends_with(&suffix) || node_lower.contains(&segment);
+                    }
+                    false
+                });
+                !should_remove
+            })
+            .cloned()
+            .collect();
+
+        let removed_count = original_len.saturating_sub(remaining_files.len());
+        if removed_count == 0 {
+            return Err(DomainError::StorageError(
+                "No matching items found in archive to remove".to_string(),
+            ));
+        }
+
+        let build_input = ArchiveBuildInput {
+            profile: existing_manifest.profile.clone(),
+            compression_level: existing_manifest.profile.compression_level,
+            encrypt_full_archive: existing_manifest.full_archive_encrypted,
+            encrypt_secrets_by_default: existing_manifest.has_encrypted_secrets,
+            passphrase: passphrase.map(ToOwned::to_owned),
+            files: remaining_files,
+            registry: existing_manifest.registry.clone(),
+            winget: existing_manifest.winget.clone(),
+            env_vars: existing_manifest.env_vars.clone(),
+            previous_manifest: Some(existing_manifest),
+        };
+
+        let mut manifest =
+            self.archive_writer
+                .write_archive(archive_path, build_input, progress)?;
+
+        if compact && manifest.stats.reclaimable_chunks > 0 {
+            manifest = self
+                .archive_writer
+                .compact_archive(archive_path, passphrase, progress)?;
+        }
+
+        Ok((manifest, removed_count))
+    }
+
     pub fn verify_archive(
         &self,
         archive_path: &Path,
