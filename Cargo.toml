@@ -31,7 +31,7 @@ wbak-gui = { path = "crates/wbak-gui" }
 # Serialization & Config
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.2.2"
 
 # Error handling
 thiserror = "2.0"
@@ -42,29 +42,29 @@ anyhow = "1.0"
 globset = "0.4"
 
 # Crypto & Hashing
-blake3 = "1.5"
-argon2 = "0.5"
-chacha20poly1305 = "0.10"
-rand = "0.8"
-zeroize = { version = "1.8", features = ["derive"] }
+blake3 = "1.8.7"
+argon2 = "0.6.0"
+chacha20poly1305 = "0.11.0"
+rand = "0.10.4"
+zeroize = { version = "1.9.2", features = ["derive"] }
 
 # Compression
-zstd = "0.13"
+zstd = "0.14.4"
 
 # Windows APIs
-winreg = "0.52"
+winreg = "0.56.0"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
-indicatif = "0.17"
+indicatif = "0.18.6"
 rpassword = "7.3"
-console = "0.15"
+console = "0.16.6"
 
 # GUI & Media
-eframe = "0.29"
-egui = "0.29"
-rfd = "0.15"
-image = { version = "0.25", default-features = false, features = [
+eframe = "0.37.0"
+egui = "0.37.0"
+rfd = "0.18.0"
+image = { version = "0.25.10", default-features = false, features = [
     "png",
     "jpeg",
     "gif",
@@ -73,19 +73,22 @@ image = { version = "0.25", default-features = false, features = [
     "ico",
     "tiff",
 ] }
-rodio = { version = "0.19", default-features = false, features = [
+rodio = { version = "0.23.0", default-features = false, features = [
+    "playback",
     "wav",
     "flac",
     "mp3",
     "vorbis",
 ] }
-windows = { version = "0.58", features = [
+windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_UI_Shell",
 ] }
 
 # Utilities & Testing
-chrono = { version = "0.4", features = ["serde"] }
-tempfile = "3.13"
+chrono = { version = "0.4.45", features = ["serde"] }
+tempfile = "3.27.0"

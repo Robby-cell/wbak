@@ -167,7 +167,7 @@ impl EnvironmentRepositoryPort for WindowsEnvironmentRepository {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         if let Ok(env_key) = hkcu.open_subkey_with_flags("Environment", KEY_READ) {
             for (name, val) in env_key.enum_values().flatten() {
-                if let Ok(s) = String::from_utf8(val.bytes.clone()).or_else(|_| {
+                if let Ok(s) = String::from_utf8(val.bytes.to_vec()).or_else(|_| {
                     let u16s: Vec<u16> = val
                         .bytes
                         .as_chunks::<2>()

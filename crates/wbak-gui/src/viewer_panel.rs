@@ -276,8 +276,11 @@ impl ContentViewerPanel {
         let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
 
         if !dropped_files.is_empty() && manifest.is_some() && !is_busy {
-            let paths: Vec<std::path::PathBuf> =
-                dropped_files.into_iter().filter_map(|df| df.path).collect();
+            let paths: Vec<std::path::PathBuf> = dropped_files
+                .into_iter()
+                .map(|df| df.path().to_path_buf())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect();
             if !paths.is_empty() {
                 action = Some(ViewerAction::InjectDroppedPaths {
                     target_logical_dir: self.current_dir.clone(),
@@ -352,11 +355,11 @@ impl ContentViewerPanel {
             } else {
                 "Public"
             };
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(30, 110, 190, 60))
                 .stroke(Stroke::new(2.0_f32, Color32::from_rgb(80, 180, 255)))
                 .inner_margin(8.0)
-                .rounding(6.0)
+                .corner_radius(6.0)
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new(format!(

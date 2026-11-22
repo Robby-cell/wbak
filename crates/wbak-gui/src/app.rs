@@ -589,10 +589,10 @@ impl WbakGuiApp {
             return;
         }
 
-        egui::Frame::none()
+        egui::Frame::new()
             .fill(Color32::from_rgba_unmultiplied(40, 48, 64, 140))
             .inner_margin(6.0)
-            .rounding(4.0)
+            .corner_radius(4.0)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new("🔑 Change Archive Password:").strong());
@@ -1600,7 +1600,8 @@ impl WbakGuiApp {
 }
 
 impl eframe::App for WbakGuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         self.poll_worker_messages();
         if self.is_busy {
             ctx.request_repaint();
@@ -1610,7 +1611,7 @@ impl eframe::App for WbakGuiApp {
             self.active_tab == ActiveTab::ContentViewer && self.viewer_panel.is_video_mode_active();
 
         if !fullscreen_video {
-            egui::TopBottomPanel::top("top_nav_bar").show(ctx, |ui| {
+            egui::Panel::top("top_nav_bar").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading(RichText::new("🛡 wbak").strong());
                     ui.separator();
@@ -1649,7 +1650,7 @@ impl eframe::App for WbakGuiApp {
         }
 
         if !fullscreen_video || self.last_error.is_some() {
-            egui::TopBottomPanel::bottom("bottom_status_bar").show(ctx, |ui| {
+            egui::Panel::bottom("bottom_status_bar").show(ui, |ui| {
                 if let Some(err) = &self.last_error {
                     ui.colored_label(Color32::from_rgb(245, 95, 95), format!("⚠ Error: {err}"));
                 }
@@ -1666,12 +1667,12 @@ impl eframe::App for WbakGuiApp {
             });
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
+        egui::CentralPanel::default().show(ui, |ui| match self.active_tab {
             ActiveTab::BackupComposer => self.render_backup_composer(ui),
             ActiveTab::IgnoreRules => self.render_ignore_rules(ui),
             ActiveTab::RegistrySelector => self.render_registry_selector(ui),
             ActiveTab::RestoreAndDiff => self.render_restore_and_diff(ui),
-            ActiveTab::ContentViewer => self.render_content_viewer(ctx, ui),
+            ActiveTab::ContentViewer => self.render_content_viewer(&ctx, ui),
             ActiveTab::EnterpriseProfile => self.render_enterprise_profile(ui),
         });
     }

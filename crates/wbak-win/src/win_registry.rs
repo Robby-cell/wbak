@@ -289,9 +289,9 @@ fn parse_reg_value(raw: &RegValue) -> Option<RegistryValueData> {
                 None
             }
         }
-        REG_BINARY => Some(RegistryValueData::Binary(raw.bytes.clone())),
+        REG_BINARY => Some(RegistryValueData::Binary(raw.bytes.to_vec())),
         REG_NONE => Some(RegistryValueData::None),
-        _ => Some(RegistryValueData::Binary(raw.bytes.clone())),
+        _ => Some(RegistryValueData::Binary(raw.bytes.to_vec())),
     }
 }
 
@@ -331,14 +331,14 @@ fn encode_utf16_null_terminated(s: &str) -> Vec<u8> {
     out
 }
 
-fn to_winreg_value(data: &RegistryValueData) -> RegValue {
+fn to_winreg_value(data: &RegistryValueData) -> RegValue<'static> {
     match data {
         RegistryValueData::Sz(s) => RegValue {
-            bytes: encode_utf16_null_terminated(s),
+            bytes: encode_utf16_null_terminated(s).into(),
             vtype: REG_SZ,
         },
         RegistryValueData::ExpandSz(s) => RegValue {
-            bytes: encode_utf16_null_terminated(s),
+            bytes: encode_utf16_null_terminated(s).into(),
             vtype: REG_EXPAND_SZ,
         },
         RegistryValueData::MultiSz(list) => {
@@ -348,24 +348,24 @@ fn to_winreg_value(data: &RegistryValueData) -> RegValue {
             }
             bytes.extend_from_slice(&0u16.to_le_bytes());
             RegValue {
-                bytes,
+                bytes: bytes.into(),
                 vtype: REG_MULTI_SZ,
             }
         }
         RegistryValueData::Dword(v) => RegValue {
-            bytes: v.to_le_bytes().to_vec(),
+            bytes: v.to_le_bytes().to_vec().into(),
             vtype: REG_DWORD,
         },
         RegistryValueData::Qword(v) => RegValue {
-            bytes: v.to_le_bytes().to_vec(),
+            bytes: v.to_le_bytes().to_vec().into(),
             vtype: REG_QWORD,
         },
         RegistryValueData::Binary(b) => RegValue {
-            bytes: b.clone(),
+            bytes: b.clone().into(),
             vtype: REG_BINARY,
         },
         RegistryValueData::None => RegValue {
-            bytes: Vec::new(),
+            bytes: Vec::new().into(),
             vtype: REG_NONE,
         },
     }

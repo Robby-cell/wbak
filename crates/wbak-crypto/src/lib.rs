@@ -3,7 +3,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
     aead::{Aead, KeyInit, Payload},
 };
-use rand::RngCore;
+use rand::Rng;
 
 use wbak_domain::{ChunkId, CryptoProviderPort, DerivedKey, DomainError, DomainResult};
 
@@ -52,7 +52,7 @@ impl CryptoProviderPort for WbakCryptoProvider {
 
     fn generate_salt(&self) -> [u8; 16] {
         let mut salt = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         salt
     }
 
@@ -82,14 +82,14 @@ impl CryptoProviderPort for WbakCryptoProvider {
         plaintext: &[u8],
         aad: &[u8],
     ) -> DomainResult<(Vec<u8>, [u8; 12])> {
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
+        let cipher = ChaCha20Poly1305::new(&Key::from(key.0));
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        rand::rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = cipher
             .encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext,
                     aad,
@@ -109,12 +109,12 @@ impl CryptoProviderPort for WbakCryptoProvider {
         ciphertext: &[u8],
         aad: &[u8],
     ) -> DomainResult<Vec<u8>> {
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
-        let nonce_obj = Nonce::from_slice(nonce);
+        let cipher = ChaCha20Poly1305::new(&Key::from(key.0));
+        let nonce_obj = Nonce::from(*nonce);
 
         cipher
             .decrypt(
-                nonce_obj,
+                &nonce_obj,
                 Payload {
                     msg: ciphertext,
                     aad,

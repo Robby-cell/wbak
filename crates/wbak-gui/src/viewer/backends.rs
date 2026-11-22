@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::num::NonZero;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Instant;
@@ -6,7 +7,7 @@ use std::time::Instant;
 use image::AnimationDecoder;
 use image::codecs::gif::GifDecoder;
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 
 use super::{
     AudioPlayerBackend, AudioSession, AudioStatus, DecodedImageAsset, DecodedImageFrame,
@@ -82,7 +83,7 @@ pub struct RodioAudioBackend;
 struct DecodedPcmTrack {
     channels: u16,
     sample_rate: u32,
-    samples: Arc<Vec<i16>>,
+    samples: Arc<Vec<f32>>,
     duration_ms: u64,
     waveform_bars: [f32; 32],
     backend_name: String,
@@ -94,21 +95,22 @@ fn decode_audio_track_in_memory(
 ) -> Result<DecodedPcmTrack, String> {
     // 1. On Windows, prefer Windows Media Foundation PCM decoding on an isolated MTA worker thread.
     //    This natively supports MP3, M4A/AAC, WAV, FLAC, WMA, and MP4/MOV/MKV audio tracks without
-    //    hitting rodio 0.19's Symphonia ReadSeekSource `byte_len() -> None` SeekError panic.
+    //    hitting Symphonia ReadSeekSource `byte_len() -> None` SeekError panics.
     #[cfg(target_os = "windows")]
     {
-        if let Ok((channels, sample_rate, pcm, reported_dur_ms)) =
+        if let Ok((channels, sample_rate, pcm_i16, reported_dur_ms)) =
             win_mf::decode_audio_pcm_in_memory(bytes.clone(), file_name)
         {
             let ch = channels.max(1);
             let sr = sample_rate.max(1);
-            let computed_ms = ((pcm.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
+            let samples: Vec<f32> = pcm_i16.iter().map(|&s| s as f32 / 32768.0).collect();
+            let computed_ms = ((samples.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
             let duration_ms = reported_dur_ms.unwrap_or(computed_ms).max(computed_ms);
-            let waveform_bars = compute_waveform_from_i16(&pcm);
+            let waveform_bars = compute_waveform_from_f32(&samples);
             return Ok(DecodedPcmTrack {
                 channels: ch,
                 sample_rate: sr,
-                samples: Arc::new(pcm),
+                samples: Arc::new(samples),
                 duration_ms,
                 waveform_bars,
                 backend_name: "Windows Media Foundation + Rodio (In-Memory PCM)".to_string(),
@@ -123,14 +125,14 @@ fn decode_audio_track_in_memory(
         move || -> Result<DecodedPcmTrack, String> {
             let decoder = Decoder::new(Cursor::new(bytes_for_fallback))
                 .map_err(|e| format!("Failed decoding audio stream in memory: {e}"))?;
-            let ch = decoder.channels().max(1);
-            let sr = decoder.sample_rate().max(1);
-            let samples: Vec<i16> = decoder.collect();
+            let ch = decoder.channels().get();
+            let sr = decoder.sample_rate().get();
+            let samples: Vec<f32> = decoder.collect();
             if samples.is_empty() {
                 return Err("Audio stream decoded 0 PCM samples".to_string());
             }
             let duration_ms = ((samples.len() as u128 * 1000) / (sr as u128 * ch as u128)) as u64;
-            let waveform_bars = compute_waveform_from_i16(&samples);
+            let waveform_bars = compute_waveform_from_f32(&samples);
             Ok(DecodedPcmTrack {
                 channels: ch,
                 sample_rate: sr,
@@ -151,9 +153,8 @@ fn decode_audio_track_in_memory(
 }
 
 struct ActiveRodioSession {
-    _stream: OutputStream,
-    stream_handle: OutputStreamHandle,
-    sink: Sink,
+    device_sink: MixerDeviceSink,
+    player: Player,
     track: DecodedPcmTrack,
     volume: f32,
     muted: bool,
@@ -179,28 +180,26 @@ impl ActiveRodioSession {
 
         if !slice.is_empty() {
             let source = SamplesBuffer::new(
-                self.track.channels.max(1),
-                self.track.sample_rate.max(1),
+                NonZero::new(self.track.channels.max(1)).unwrap(),
+                NonZero::new(self.track.sample_rate.max(1)).unwrap(),
                 slice,
             );
-            self.sink.append(source);
+            self.player.append(source);
         }
     }
 
-    fn rebuild_sink_at(&mut self, start_ms: u64, play_immediately: bool) {
-        self.sink.stop();
-        if let Ok(new_sink) = Sink::try_new(&self.stream_handle) {
-            self.sink = new_sink;
-            let eff_vol = if self.muted { 0.0 } else { self.volume };
-            self.sink.set_volume(eff_vol);
-            self.append_from_ms(start_ms);
-            if play_immediately {
-                self.sink.play();
-                self.last_resume = Some(Instant::now());
-            } else {
-                self.sink.pause();
-                self.last_resume = None;
-            }
+    fn rebuild_player_at(&mut self, start_ms: u64, play_immediately: bool) {
+        self.player.stop();
+        self.player = Player::connect_new(self.device_sink.mixer());
+        let eff_vol = if self.muted { 0.0 } else { self.volume };
+        self.player.set_volume(eff_vol);
+        self.append_from_ms(start_ms);
+        if play_immediately {
+            self.player.play();
+            self.last_resume = Some(Instant::now());
+        } else {
+            self.player.pause();
+            self.last_resume = None;
         }
         self.accumulated_ms = start_ms.min(self.track.duration_ms);
     }
@@ -218,18 +217,18 @@ impl ActiveRodioSession {
 
 impl AudioSession for ActiveRodioSession {
     fn play(&mut self) {
-        if self.sink.empty() {
-            self.rebuild_sink_at(0, true);
+        if self.player.empty() {
+            self.rebuild_player_at(0, true);
             return;
         }
-        self.sink.play();
+        self.player.play();
         if self.last_resume.is_none() {
             self.last_resume = Some(Instant::now());
         }
     }
 
     fn pause(&mut self) {
-        self.sink.pause();
+        self.player.pause();
         if let Some(t) = self.last_resume.take() {
             self.accumulated_ms = self
                 .accumulated_ms
@@ -239,29 +238,30 @@ impl AudioSession for ActiveRodioSession {
     }
 
     fn stop(&mut self) {
-        self.rebuild_sink_at(0, false);
+        self.rebuild_player_at(0, false);
     }
 
     fn seek_ms(&mut self, pos_ms: u64) {
-        let was_playing = !self.sink.is_paused() && !self.sink.empty();
+        let was_playing = !self.player.is_paused() && !self.player.empty();
         let clamped = pos_ms.min(self.track.duration_ms);
-        self.rebuild_sink_at(clamped, was_playing);
+        self.rebuild_player_at(clamped, was_playing);
     }
 
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.5);
         if !self.muted {
-            self.sink.set_volume(self.volume);
+            self.player.set_volume(self.volume);
         }
     }
 
     fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
-        self.sink.set_volume(if muted { 0.0 } else { self.volume });
+        self.player
+            .set_volume(if muted { 0.0 } else { self.volume });
     }
 
     fn status(&mut self) -> AudioStatus {
-        if self.sink.empty()
+        if self.player.empty()
             && self.last_resume.is_some()
             && let Some(t) = self.last_resume.take()
         {
@@ -270,7 +270,7 @@ impl AudioSession for ActiveRodioSession {
                 .saturating_add(t.elapsed().as_millis() as u64)
                 .min(self.track.duration_ms);
         }
-        let is_playing = !self.sink.is_paused() && !self.sink.empty();
+        let is_playing = !self.player.is_paused() && !self.player.empty();
         AudioStatus {
             is_playing,
             elapsed_ms: self.current_elapsed_ms(),
@@ -283,7 +283,7 @@ impl AudioSession for ActiveRodioSession {
     }
 }
 
-fn compute_waveform_from_i16(samples: &[i16]) -> [f32; 32] {
+fn compute_waveform_from_f32(samples: &[f32]) -> [f32; 32] {
     let mut bars = [0.08f32; 32];
     if samples.is_empty() {
         return bars;
@@ -299,8 +299,8 @@ fn compute_waveform_from_i16(samples: &[i16]) -> [f32; 32] {
         let step = (slice.len() / 256).max(1);
         let mut sum_sq = 0.0f64;
         let mut count = 0usize;
-        for s in slice.iter().step_by(step) {
-            let norm = (*s as f64) / 32768.0;
+        for &s in slice.iter().step_by(step) {
+            let norm = s as f64;
             sum_sq += norm * norm;
             count += 1;
         }
@@ -320,16 +320,14 @@ impl AudioPlayerBackend for RodioAudioBackend {
     ) -> Result<Box<dyn AudioSession>, String> {
         let track = decode_audio_track_in_memory(bytes, file_name)?;
 
-        let (stream, stream_handle) = catch_unwind(OutputStream::try_default)
+        let device_sink = catch_unwind(DeviceSinkBuilder::open_default_sink)
             .map_err(|_| "Audio output stream initialization panicked".to_string())?
             .map_err(|e| format!("Failed opening system audio output device: {e}"))?;
-        let sink = Sink::try_new(&stream_handle)
-            .map_err(|e| format!("Failed creating audio sink: {e}"))?;
+        let player = Player::connect_new(device_sink.mixer());
 
         let mut session = ActiveRodioSession {
-            _stream: stream,
-            stream_handle,
-            sink,
+            device_sink,
+            player,
             track,
             volume: 0.85,
             muted: false,
@@ -337,9 +335,9 @@ impl AudioPlayerBackend for RodioAudioBackend {
             last_resume: Some(Instant::now()),
         };
 
-        session.sink.set_volume(session.volume);
+        session.player.set_volume(session.volume);
         session.append_from_ms(0);
-        session.sink.play();
+        session.player.play();
 
         Ok(Box::new(session))
     }
