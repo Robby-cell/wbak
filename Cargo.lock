@@ -4421,7 +4421,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4433,7 +4433,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-bin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4465,7 +4465,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -4478,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4488,7 +4488,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-filter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "globset",
  "tempfile",
@@ -4498,7 +4498,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4515,7 +4515,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-gui-bin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "wbak-app",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -4544,7 +4544,7 @@ dependencies = [
 
 [[package]]
 name = "wbak-win"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "globset",
